@@ -13,6 +13,8 @@ public sealed class PluginProfile
     public LayoutRules MiseEnPage { get; set; } = new();
     public CarnetRules Carnets { get; set; } = new();
     public JoineryRules Menuiseries { get; set; } = new();
+    public DimensionRules Cotation { get; set; } = new();
+    public FolderRules Rangement { get; set; } = new();
 
     public IReadOnlyList<string> Resource(string key) =>
         Ressources.TryGetValue(key, out var v) ? v : Array.Empty<string>();
@@ -95,6 +97,8 @@ public sealed class JoineryLot
     public string Code { get; set; } = "";
     public string Libelle { get; set; } = "";
     public List<string> Prefixes { get; set; } = new();
+    /// <summary>Sous-dossier des fiches du lot dans le dossier DCE du navigateur (« CALEPIN BOIS »).</summary>
+    public string? SousDossier { get; set; }
 }
 
 public sealed class JoineryRules
@@ -102,4 +106,76 @@ public sealed class JoineryRules
     public List<JoineryLot> Lots { get; set; } = new();
     /// <summary>Nombre de répétitions déclaré du bâtiment type (mode « bâtiment type répété »). 1 = occurrences réelles.</summary>
     public int RepetitionsBatiment { get; set; } = 1;
+    /// <summary>Annotations des élévations de fiches (quincaillerie, matériaux), par lot, catégorie et préfixe.</summary>
+    public List<JoineryAnnotationRule> Annotations { get; set; } = new();
+
+    /// <summary>
+    /// Règle d'annotation d'un repère : la plus spécifique l'emporte (préfixe explicite, puis catégorie, puis lot seul).
+    /// </summary>
+    public JoineryAnnotationRule? AnnotationsFor(string? lot, bool isDoor, string mark)
+    {
+        if (lot == null) return null;
+        var cat = isDoor ? "portes" : "fenetres";
+        return Annotations
+            .Where(r => r.Lots.Count == 0 || r.Lots.Contains(lot, StringComparer.OrdinalIgnoreCase))
+            .Where(r => string.IsNullOrEmpty(r.Categorie) || string.Equals(r.Categorie, cat, StringComparison.OrdinalIgnoreCase))
+            .Select(r => (Rule: r, Prefix: r.Prefixes.Where(p => mark.StartsWith(p, StringComparison.OrdinalIgnoreCase)).Select(p => p.Length).DefaultIfEmpty(-1).Max()))
+            .Where(x => x.Rule.Prefixes.Count == 0 || x.Prefix > 0)
+            .OrderByDescending(x => x.Prefix)
+            .ThenByDescending(x => string.IsNullOrEmpty(x.Rule.Categorie) ? 0 : 1)
+            .ThenByDescending(x => x.Rule.Lots.Count > 0 ? 1 : 0)
+            .Select(x => x.Rule).FirstOrDefault();
+    }
+}
+
+public sealed class JoineryAnnotationRule
+{
+    public List<string> Lots { get; set; } = new();
+    /// <summary>« portes », « fenetres » ou vide (toutes).</summary>
+    public string? Categorie { get; set; }
+    /// <summary>Préfixes de repère visés (« VJ », « EnsVJ ») ; vide = tous les repères du lot.</summary>
+    public List<string> Prefixes { get; set; } = new();
+    public List<JoineryNote> Notes { get; set; } = new();
+}
+
+/// <summary>Annotation avec ligne de repère : texte et point visé sur l'élévation (poignee, serrure, charniere_haut…).</summary>
+public sealed class JoineryNote
+{
+    public string Texte { get; set; } = "";
+    public string Cible { get; set; } = "";
+}
+
+/// <summary>Cotation des carnets (plans et élévations de pièces) et des fiches menuiseries.</summary>
+public sealed class DimensionRules
+{
+    public bool Carnets { get; set; } = true;
+    public bool Fiches { get; set; } = true;
+    /// <summary>Unité des cotes : « cm » (carnets de l'agence : 410, 328) ou « mm » (fiches : 930, 2400).</summary>
+    public string UniteCarnets { get; set; } = "cm";
+    public string UniteFiches { get; set; } = "mm";
+    public double TexteMm { get; set; } = 2.0;
+    /// <summary>Distance papier entre deux lignes de cotes (et entre l'ouvrage et la première ligne).</summary>
+    public double DecalageMm { get; set; } = 7;
+    /// <summary>Hauteur de la poignée des portes, cotée depuis le bas de la porte (mm).</summary>
+    public double HauteurPoigneeMm { get; set; } = 1050;
+    /// <summary>Libellé au-dessus de la cote de largeur en plan des fiches.</summary>
+    public string? LibelleLargeurPlan { get; set; } = "largeur réservation";
+    /// <summary>Largeur papier réservée aux annotations à droite de l'élévation d'une fiche.</summary>
+    public double BandeAnnotationsMm { get; set; } = 70;
+}
+
+/// <summary>
+/// Rangement dans le navigateur de projet : les éléments générés vont dans le dossier « DCE », avec un sous-dossier par famille
+/// documentaire ; les dossiers « CALEPIN … » de l'agence sont rangés dans « DCE ».
+/// </summary>
+public sealed class FolderRules
+{
+    public bool Actif { get; set; } = true;
+    public string Dossier { get; set; } = "DCE";
+    public string SousDossierPlans { get; set; } = "PLANS GENERAUX";
+    public string SousDossierCoupesFacades { get; set; } = "COUPES ET FACADES";
+    public string SousDossierCarnets { get; set; } = "DETAILS DE PIECES";
+    public string SousDossierFiches { get; set; } = "CALEPINS MENUISERIES";
+    /// <summary>Dossiers de premier niveau de l'agence à ranger dans le dossier DCE (début du nom, sans accents ni casse).</summary>
+    public List<string> ARangerDansDossier { get; set; } = new() { "CALEPIN" };
 }

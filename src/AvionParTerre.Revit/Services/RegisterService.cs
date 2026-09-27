@@ -26,6 +26,7 @@ internal sealed class RegisterService
     public static string FamilyOf(string role) => role switch
     {
         "plan_general" => "Plans généraux",
+        "coupes_facades" => "Coupes et façades",
         "carnet_page" => "Carnets de pièces",
         "fiche" => "Fiches menuiseries",
         _ => "Autres (hors plugin)",

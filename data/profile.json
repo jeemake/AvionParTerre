@@ -1,7 +1,7 @@
 {
   "schema": "avion-par-terre/profile",
   "schema_version": 1,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "remarque": "Noms des ressources Revit K&D relevés dans les gabarits agence (maquettes PEM V2 et LESE TEST, Revit 2025). Chaque entrée accepte plusieurs noms, comparés sans accents ni casse ; une famille rechargée (« Cartouche A3 Horizontale1 ») est reconnue ; à défaut, une ressource équivalente disponible est utilisée et signalée. Paramètres > Ressources permet d'imposer un choix par projet.",
   "ressources": {
     "cartouche_A0": [
@@ -97,6 +97,29 @@
     "titre_vue_famille": [
       "TITRE DE VUE:Titre de vue",
       "FR_Titre de vue simple:FR_Titre de vue simple"
+    ],
+    "type_vue_elevation": [
+      "Élévation du bâtiment",
+      "Elévation du bâtiment",
+      "Façade",
+      "Elévation"
+    ],
+    "gabarit_coupe": [
+      "APD-DCE_Coupes",
+      "APD-DCE_Coupe",
+      "APD-DCE_100e_Coupes"
+    ],
+    "gabarit_facade": [
+      "APD-DCE_Façades",
+      "APD-DCE_Facades",
+      "APD-DCE_Façade",
+      "APD-DCE_100e_Façades"
+    ],
+    "type_cote_piece": [
+      "Avion par terre - Cote cm"
+    ],
+    "type_cote_menuiserie": [
+      "Avion par terre - Cote mm"
     ]
   },
   "parametres": {
@@ -244,7 +267,8 @@
           "ENSA",
           "CLV",
           "SD"
-        ]
+        ],
+        "sous_dossier": "CALEPIN ALUMINIUM"
       },
       {
         "code": "CB",
@@ -266,7 +290,8 @@
           "PBO",
           "PB",
           "EnsBV"
-        ]
+        ],
+        "sous_dossier": "CALEPIN BOIS"
       },
       {
         "code": "CS",
@@ -276,9 +301,207 @@
           "PORTAIL",
           "VR",
           "GR"
-        ]
+        ],
+        "sous_dossier": "CALEPIN SERRURERIE"
       }
     ],
-    "repetitions_batiment": 1
+    "repetitions_batiment": 1,
+    "annotations": [
+      {
+        "lots": [
+          "CB"
+        ],
+        "categorie": "portes",
+        "notes": [
+          {
+            "texte": "Charnière réversible à billes",
+            "cible": "charniere_haut"
+          },
+          {
+            "texte": "Dormant bois",
+            "cible": "dormant"
+          },
+          {
+            "texte": "Ouvrant bois ép. 40 mm",
+            "cible": "ouvrant"
+          },
+          {
+            "texte": "Poignées inox",
+            "cible": "poignee"
+          },
+          {
+            "texte": "Serrure à cylindre",
+            "cible": "serrure"
+          },
+          {
+            "texte": "Charnière réversible à billes",
+            "cible": "charniere_milieu"
+          },
+          {
+            "texte": "Charnière réversible à billes",
+            "cible": "charniere_bas"
+          }
+        ]
+      },
+      {
+        "lots": [
+          "CB"
+        ],
+        "categorie": "fenetres",
+        "notes": [
+          {
+            "texte": "Dormant bois",
+            "cible": "dormant"
+          },
+          {
+            "texte": "Ouvrant bois",
+            "cible": "ouvrant"
+          },
+          {
+            "texte": "Vitrage",
+            "cible": "vitrage"
+          },
+          {
+            "texte": "Poignée inox",
+            "cible": "poignee_fenetre"
+          }
+        ]
+      },
+      {
+        "lots": [
+          "CAL"
+        ],
+        "categorie": "portes",
+        "notes": [
+          {
+            "texte": "Paumelles aluminium",
+            "cible": "charniere_haut"
+          },
+          {
+            "texte": "Dormant aluminium",
+            "cible": "dormant"
+          },
+          {
+            "texte": "Ouvrant aluminium",
+            "cible": "ouvrant"
+          },
+          {
+            "texte": "Vitrage",
+            "cible": "vitrage"
+          },
+          {
+            "texte": "Poignées inox",
+            "cible": "poignee"
+          },
+          {
+            "texte": "Serrure à cylindre",
+            "cible": "serrure"
+          },
+          {
+            "texte": "Paumelles aluminium",
+            "cible": "charniere_bas"
+          }
+        ]
+      },
+      {
+        "lots": [
+          "CAL"
+        ],
+        "categorie": "fenetres",
+        "prefixes": [
+          "EnsVJ",
+          "VJ"
+        ],
+        "notes": [
+          {
+            "texte": "Cadre aluminium",
+            "cible": "dormant"
+          },
+          {
+            "texte": "Lames orientables aluminium",
+            "cible": "lames"
+          },
+          {
+            "texte": "Manœuvre des lames",
+            "cible": "poignee_fenetre"
+          }
+        ]
+      },
+      {
+        "lots": [
+          "CAL"
+        ],
+        "categorie": "fenetres",
+        "notes": [
+          {
+            "texte": "Dormant aluminium",
+            "cible": "dormant"
+          },
+          {
+            "texte": "Ouvrant aluminium",
+            "cible": "ouvrant"
+          },
+          {
+            "texte": "Vitrage",
+            "cible": "vitrage"
+          },
+          {
+            "texte": "Poignée",
+            "cible": "poignee_fenetre"
+          },
+          {
+            "texte": "Joint d'étanchéité",
+            "cible": "joint"
+          }
+        ]
+      },
+      {
+        "lots": [
+          "CS"
+        ],
+        "notes": [
+          {
+            "texte": "Cadre acier",
+            "cible": "dormant"
+          },
+          {
+            "texte": "Remplissage",
+            "cible": "ouvrant"
+          },
+          {
+            "texte": "Serrure à cylindre",
+            "cible": "serrure"
+          },
+          {
+            "texte": "Poignée",
+            "cible": "poignee"
+          }
+        ]
+      }
+    ]
+  },
+  "cotation": {
+    "remarque": "Cotes des carnets (plan : largeurs, baies ; élévations : largeur, HSP, allèges) et des fiches (largeur réservation, hauteur, poignée). Types de cotes « Avion par terre - Cote cm / mm » créés en Century Gothic si aucun type du profil n'existe.",
+    "carnets": true,
+    "fiches": true,
+    "unite_carnets": "cm",
+    "unite_fiches": "mm",
+    "texte_mm": 2.0,
+    "decalage_mm": 7,
+    "hauteur_poignee_mm": 1050,
+    "libelle_largeur_plan": "largeur réservation",
+    "bande_annotations_mm": 70
+  },
+  "rangement": {
+    "remarque": "Navigateur de projet : éléments générés dans le dossier « DCE » (premier niveau de regroupement de l'organisation active), sous-dossier au niveau suivant. Les dossiers « CALEPIN … » de l'agence sont rangés dans « DCE ».",
+    "actif": true,
+    "dossier": "DCE",
+    "sous_dossier_plans": "PLANS GENERAUX",
+    "sous_dossier_coupes_facades": "COUPES ET FACADES",
+    "sous_dossier_carnets": "DETAILS DE PIECES",
+    "sous_dossier_fiches": "CALEPINS MENUISERIES",
+    "a_ranger_dans_dossier": [
+      "CALEPIN"
+    ]
   }
 }

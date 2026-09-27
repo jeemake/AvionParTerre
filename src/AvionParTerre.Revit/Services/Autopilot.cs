@@ -272,9 +272,19 @@ internal sealed class Autopilot
                     Norms.PlanSheetByLevel.TryGetValue(l.Id, out var sh) ? $"couvert par la feuille {sh.SheetNumber} {sh.Name} — conservée" : $"plan « {PlanGenerator.SheetTitle(l)} »",
                     Norms.PlanSheetByLevel.ContainsKey(l.Id) ? DecisionSource.Projet : DecisionSource.Regle, "niveau comportant des pièces", id: l.Id.Value);
         }
+        if (Steps.Plans)
+        {
+            _coupes = Norms.SectionSheet == null;
+            _facades = Norms.ElevationSheet == null;
+            Log.Add("Plans généraux", "Coupes", _coupes ? "coupes A-A et B-B par le centre du bâtiment" : $"feuille de l'agence {Norms.SectionSheet!.SheetNumber} {Norms.SectionSheet.Name} — conservée",
+                _coupes ? DecisionSource.Regle : DecisionSource.Projet, "axes principaux des murs");
+            Log.Add("Plans généraux", "Façades", _facades ? "quatre façades selon les axes du bâtiment" : $"feuille de l'agence {Norms.ElevationSheet!.SheetNumber} {Norms.ElevationSheet.Name} — conservée",
+                _facades ? DecisionSource.Regle : DecisionSource.Projet, "axes principaux des murs, nord du projet");
+        }
         if (Steps.Carnets) _carnets = CarnetRooms();
     }
 
+    private bool _coupes, _facades;
     private List<Level> _planLevels = new();
     private List<Room> _carnets = new();
 
@@ -300,7 +310,9 @@ internal sealed class Autopilot
                     _carnets.RemoveAll(r => r.Id.Value == id);
                     break;
                 case "Plans généraux":
-                    _planLevels.RemoveAll(l => l.Id.Value == id);
+                    if (d.Objet == "Coupes") _coupes = false;
+                    else if (d.Objet == "Façades") _facades = false;
+                    else _planLevels.RemoveAll(l => l.Id.Value == id);
                     break;
                 case "Menuiseries":
                     foreach (var j in _joinery.Where(j => j.Symbol.Id.Value == id))
@@ -381,6 +393,11 @@ internal sealed class Autopilot
             var reqs = _planLevels.Select(l => new PlanRequest { Level = l, Index = levels.IndexOf(l) }).ToList();
             new PlanGenerator(_doc, _data, dce, Norms).Run(reqs, report, w);
         }
+        if (Steps.Plans && (_coupes || _facades) && !cancelled())
+        {
+            step("Plans généraux : coupes et façades…");
+            new SectionElevationGenerator(_doc, _data, PlanProfile(res), Norms).Run(new SectionElevationRequest { Coupes = _coupes, Facades = _facades }, report, w);
+        }
         if (Steps.Carnets && !cancelled())
         {
             var rooms = MaxCarnets is { } mc ? _carnets.Take(mc).ToList() : _carnets;
@@ -402,6 +419,11 @@ internal sealed class Autopilot
                 step($"Fiches menuiseries : {i + 1}/{todo.Count} — {todo[i].Mark}");
                 gen.Run(new[] { todo[i] }, report, w);
             }
+        }
+        if ((Steps.Plans || Steps.Carnets || Steps.Fiches) && !cancelled())
+        {
+            step("Rangement du navigateur (dossier DCE)…");
+            new BrowserFolders(_doc, _data).Arrange(report, w);
         }
         foreach (var e in AiErrors) report.Issue(Severity.ARevoir, "ia", "OpenRouter", e, "Relancer, changer de modèle ou décider manuellement.");
     }

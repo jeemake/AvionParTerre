@@ -23,6 +23,7 @@ internal sealed class CarnetGenerator
     private readonly DceProfile _dce;
     private readonly KdResources _res;
     private readonly CarnetRules _rules;
+    private readonly Dimensioning _dims;
 
     public CarnetGenerator(Document doc, PluginData data, DceProfile dce)
     {
@@ -31,6 +32,7 @@ internal sealed class CarnetGenerator
         _dce = dce;
         _rules = data.Profile.Carnets;
         _res = new KdResources(doc, data);
+        _dims = new Dimensioning(doc, data);
     }
 
     public static string BaseKey(Room r) => $"CARNET|{r.UniqueId}";
@@ -60,7 +62,7 @@ internal sealed class CarnetGenerator
             if (!RevitUtil.IsEnclosed(r)) { lines.Add($"{RevitUtil.RoomLabel(r)} : pièce non placée ou non fermée — ignorée"); continue; }
             lines.Add(g.HasValue
                 ? $"{RevitUtil.RoomLabel(r)} : carnet D{g} existant — vues manquantes recréées, retouches conservées"
-                : $"{RevitUtil.RoomLabel(r)} : nouveau carnet D{next++} (plan, 3D, tableau, 4 élévations) sur A3");
+                : $"{RevitUtil.RoomLabel(r)} : nouveau carnet D{next++} (plan coté, 3D, tableau, 4 élévations cotées) sur A3");
         }
         return string.Join(Environment.NewLine, lines);
     }
@@ -101,6 +103,25 @@ internal sealed class CarnetGenerator
             }
         }
         report.Issues.AddRange(_res.Missing);
+        if (_dims.Created > 0) report.Created.Add($"{_dims.Created} cote(s) dans les plans et élévations de pièces");
+        if (_dims.Failed > 0)
+            report.Issue(Severity.Information, "cotation", "Carnets de pièces", $"{_dims.Failed} cote(s) non créée(s) (référence de mur, de sol ou de baie introuvable).",
+                "Compléter les cotes à la main si nécessaire (murs non orthogonaux, familles sans plans de référence).");
+    }
+
+    /// <summary>Cote une vue gérée une seule fois (marque « cotes » dans son identité) : les vues des carnets antérieurs sont complétées.</summary>
+    private bool Dimension(View v, Action<View> annotate)
+    {
+        var id = Identity.Get(v);
+        if (id == null || !_data.Profile.Cotation.Carnets) return false;
+        var props = ManagedProps.Parse(id.Generated);
+        if (props.Values.ContainsKey("cotes")) return false;
+        _doc.Regenerate();
+        annotate(v);
+        props.Values["cotes"] = "1";
+        id.Generated = props.Serialize();
+        Identity.Set(v, id);
+        return true;
     }
 
     private sealed class RoomFrame
@@ -181,12 +202,13 @@ internal sealed class CarnetGenerator
         // Plan : laisser si possible la moitié droite à la 3D et au tableau (recette AT « plan + tableau + 3D »)
         var planScale = Fit(planW, planH, area.Width * 0.55, area.Height, scales)
                         ?? Fit(planW, planH, area.Width, area.Height, scales) ?? scales.Max();
-        // Élévations : 2 × 2 sur une page, sinon 2 par page, sinon une par page
+        // Élévations : 2 × 2 sur une page, sinon 2 par page, sinon une par page (bande des cotes réservée à gauche et en bas)
         var elevW = Math.Max(f.W, f.D) + 2 * Units.Mm(300);
         var elevH = f.H + Units.Mm(400);
-        var elevScale = Fit(elevW, elevH, (area.Width - sp) / 2, (area.Height - sp) / 2, scales)
-                        ?? Fit(elevW, elevH, area.Width, (area.Height - sp) / 2, scales)
-                        ?? Fit(elevW, elevH, area.Width, area.Height, scales) ?? scales.Max();
+        var band = _data.Profile.Cotation.Carnets ? 2 * _data.Profile.Cotation.DecalageMm + 6 : 0;
+        var elevScale = Fit(elevW, elevH, (area.Width - sp) / 2 - band, (area.Height - sp) / 2 - band, scales)
+                        ?? Fit(elevW, elevH, area.Width - band, (area.Height - sp) / 2 - band, scales)
+                        ?? Fit(elevW, elevH, area.Width - band, area.Height - band, scales) ?? scales.Max();
         if (Units.ToMm(planW) / planScale > area.Width || Units.ToMm(elevW) / elevScale > area.Width)
             report.Issue(Severity.ARevoir, "echelle", label, "Pièce trop grande pour l'A3 aux échelles autorisées.",
                 "Découper la pièce en zones ou autoriser une échelle supplémentaire dans le profil.", room.Id.Value);
@@ -215,9 +237,12 @@ internal sealed class CarnetGenerator
             Identity.Set(plan, new IdentityData { Key = planKey, Role = "carnet_plan" });
             _doc.Regenerate();
             TagPlan(plan, room);
-            report.Created.Add($"Vue « {plan.Name} » (1:{plan.Scale})");
+            Dimension(plan, v => _dims.RoomPlan((ViewPlan)v, room, report.Created));
+            report.Created.Add($"Vue « {plan.Name} » (1:{plan.Scale}), cotée");
             items.Add(new SheetItem { Key = "plan", View = plan });
         }
+        else if (Dimension(plan, v => _dims.RoomPlan((ViewPlan)v, room, report.Created)))
+            report.Updated.Add($"Vue « {plan.Name} » : cotes ajoutées");
         else report.Unchanged.Add($"Vue « {plan.Name} »");
 
         // Vue 3D découpée
@@ -278,7 +303,13 @@ internal sealed class CarnetGenerator
         {
             var letter = Numbering.Letter(i);
             var ekey = $"{BaseKey(room)}|E|{letter}";
-            if (Existing(ekey) is ViewSection existingElev) { report.Unchanged.Add($"Vue « {existingElev.Name} »"); continue; }
+            if (Existing(ekey) is ViewSection existingElev)
+            {
+                if (Dimension(existingElev, v => _dims.RoomElevation((ViewSection)v, room, report.Created)))
+                    report.Updated.Add($"Vue « {existingElev.Name} » : cotes ajoutées");
+                else report.Unchanged.Add($"Vue « {existingElev.Name} »");
+                continue;
+            }
             var elevName = Numbering.Format(n.CarnetElevation, ("groupe", group), ("lettre", letter));
             var ev = InteriorElevation(f, looks[i], widths[i], depths[i]);
             ApplyTemplate(ev, _res.ViewTemplate("gabarit_elevation_piece"));
@@ -289,7 +320,8 @@ internal sealed class CarnetGenerator
             RevitUtil.SetTitleOnSheet(ev, elevName);
             RevitUtil.CropAnnotations(ev);
             Identity.Set(ev, new IdentityData { Key = ekey, Role = "carnet_elevation" });
-            report.Created.Add($"Vue « {ev.Name} » (1:{ev.Scale})");
+            Dimension(ev, v => _dims.RoomElevation((ViewSection)v, room, report.Created));
+            report.Created.Add($"Vue « {ev.Name} » (1:{ev.Scale}), cotée");
             items.Add(new SheetItem { Key = "E" + letter, View = ev, StartNewPage = i == 0 });
         }
 

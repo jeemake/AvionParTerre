@@ -57,6 +57,7 @@ internal sealed class FicheGenerator
     private readonly KdResources _res;
     private readonly JoineryClassifier _classifier;
     private readonly ProjectNorms _norms;
+    private readonly Dimensioning _dims;
 
     public FicheGenerator(Document doc, PluginData data, ProjectNorms? norms = null)
     {
@@ -65,6 +66,7 @@ internal sealed class FicheGenerator
         _res = new KdResources(doc, data);
         _classifier = new JoineryClassifier(data.Profile.Menuiseries);
         _norms = norms ?? ProjectNorms.Detect(doc, data);
+        _dims = new Dimensioning(doc, data);
     }
 
     public ProjectNorms Norms => _norms;
@@ -175,6 +177,9 @@ internal sealed class FicheGenerator
             }
         }
         report.Issues.AddRange(_res.Missing);
+        if (_dims.Failed > 0)
+            report.Issue(Severity.Information, "cotation", "Fiches menuiseries", $"{_dims.Failed} cote(s) non créée(s) (plans de référence de famille introuvables).",
+                "Compléter les cotes à la main si nécessaire.");
     }
 
     private string SheetNumber(JoineryType jt, int index, FicheNorm? norm)
@@ -197,7 +202,8 @@ internal sealed class FicheGenerator
         // Convention de l'agence : la feuille porte le nom du repère
         sheet.Name = RevitUtil.CleanName(jt.Mark);
         var lotLabel = _data.Profile.Menuiseries.Lots.FirstOrDefault(l => l.Code == jt.Lot)?.Libelle;
-        PlanGenerator.FillSheetParams(sheet, _data.Profile, norm?.Phase ?? "DCE", norm != null ? norm.Lot2 : TextNorm.UpperTitle(lotLabel));
+        // Phase « DCE » (cartouche des calepins de l'agence) ; le calepin du lot devient un sous-dossier de DCE (BrowserFolders)
+        PlanGenerator.FillSheetParams(sheet, _data.Profile, "DCE", norm != null ? norm.Lot2 : TextNorm.UpperTitle(lotLabel));
 
         var composer = new SheetComposer(_doc, _data.Profile.MiseEnPage, _res.ViewportTypeWithTitle());
         var area = composer.DrawingArea(sheet);
@@ -230,7 +236,8 @@ internal sealed class FicheGenerator
             items.Add(new SheetItem { Key = "dessin", View = jt.Drafting });
             report.Created.Add($"{jt.Mark} : vue de dessin K&D « {jt.Drafting.Name} » réutilisée");
         }
-        else
+        Func<List<ElementId>>? annotate = null;
+        if (jt.Drafting == null)
         {
             var rep = Representative(jt);
             if (rep != null)
@@ -238,9 +245,10 @@ internal sealed class FicheGenerator
                 var (elev, plan) = GeneratedViews(jt, rep, area);
                 items.Add(new SheetItem { Key = "elevation", View = elev });
                 if (plan != null) items.Add(new SheetItem { Key = "plan", View = plan });
-                report.Created.Add($"{jt.Mark} : élévation et plan générés sur l'exemplaire {rep.Id.Value} (gabarits Calepin Baies)");
-                report.Issue(Severity.ARevoir, "fiche_generee", jt.Mark, "Aucune vue de dessin K&D nommée d'après le repère : vues de modèle générées.",
-                    "Contrôler les vues, compléter coupes/détails (dormant, quincaillerie) selon l'ouvrage.", jt.Symbol.Id.Value);
+                annotate = () => Annotate(jt, rep, elev, plan, report);
+                report.Created.Add($"{jt.Mark} : élévation et plan générés sur l'exemplaire {rep.Id.Value} (gabarits Calepin Baies), cotés et annotés");
+                report.Issue(Severity.ARevoir, "fiche_generee", jt.Mark, "Aucune vue de dessin K&D nommée d'après le repère : vues de modèle générées, cotées et annotées.",
+                    "Contrôler les vues, les cotes et les annotations (côté des charnières et de la poignée), compléter coupes/détails selon l'ouvrage.", jt.Symbol.Id.Value);
             }
         }
         var (sched, agencyFormat) = LocationSchedule(jt, report);
@@ -249,6 +257,8 @@ internal sealed class FicheGenerator
         // Une fiche = une page : si le contenu déborde, nomenclature regroupée puis vues à l'échelle suivante.
         var scalable = items.Where(i => i.View is ViewSection or ViewPlan).Select(i => i.View!).ToList();
         int[] steps = { 20, 25, 50, 100 };
+        // Cotes et annotations avant composition (l'emprise des vues en tient compte), refaites à chaque changement d'échelle
+        var annotations = annotate?.Invoke() ?? new List<ElementId>();
         CompositionResult res;
         for (int attempt = 0; ; attempt++)
         {
@@ -266,11 +276,13 @@ internal sealed class FicheGenerator
                 continue;
             }
             if (scalable.Count == 0) break;
+            foreach (var id in annotations.Where(id => _doc.GetElement(id) != null)) _doc.Delete(id);
             foreach (var v in scalable)
             {
                 var next = steps.FirstOrDefault(x => x > v.Scale);
                 v.Scale = next == 0 ? v.Scale * 2 : next;
             }
+            annotations = annotate?.Invoke() ?? new List<ElementId>();
         }
         if (res.PageCount > 1)
             report.Issue(Severity.ARevoir, "debordement", number, "Contenu trop grand pour une fiche A3 : éléments superposés.",
@@ -292,6 +304,7 @@ internal sealed class FicheGenerator
     private void UpdateFiche(JoineryType jt, Report report)
     {
         var sheet = jt.Fiche!;
+        CompleteAnnotations(jt, report);
         var id = Identity.Get(sheet)!;
         var props = ManagedProps.Parse(id.Generated);
         var note = new FilteredElementCollector(_doc, sheet.Id).OfClass(typeof(TextNote)).Cast<TextNote>()
@@ -320,6 +333,50 @@ internal sealed class FicheGenerator
                 report.Kept.Add($"Fiche {sheet.SheetNumber} {jt.Mark} : bloc descriptif retouché conservé (quantité actuelle : {jt.Instances.Count} u)");
                 break;
         }
+    }
+
+    /// <summary>Cotes et annotations des vues générées d'une fiche (élévation, plan), avec la règle d'annotation du lot.</summary>
+    private List<ElementId> Annotate(JoineryType jt, FamilyInstance rep, ViewSection elev, ViewPlan? plan, Report report)
+    {
+        var ids = new List<ElementId>();
+        if (!_data.Profile.Cotation.Fiches) return ids;
+        _doc.Regenerate();
+        var isDoor = rep.Category?.Id.Value == (long)BuiltInCategory.OST_Doors;
+        var rule = _data.Profile.Menuiseries.AnnotationsFor(jt.Lot, isDoor, jt.Mark);
+        _dims.JoineryElevation(elev, rep, rule, report.Created, () => _res.CenturyText(_data.Profile.Cotation.TexteMm, bold: false, report.Created));
+        ids.AddRange(_dims.Last);
+        MarkAnnotated(elev);
+        if (plan != null)
+        {
+            _dims.JoineryPlan(plan, rep, report.Created);
+            ids.AddRange(_dims.Last);
+            MarkAnnotated(plan);
+        }
+        return ids;
+    }
+
+    private static bool IsAnnotated(View v) => Identity.Get(v) is { } d && ManagedProps.Parse(d.Generated).Values.ContainsKey("cotes");
+
+    private static void MarkAnnotated(View v)
+    {
+        var d = Identity.Get(v);
+        if (d == null) return;
+        var props = ManagedProps.Parse(d.Generated);
+        props.Values["cotes"] = "1";
+        d.Generated = props.Serialize();
+        Identity.Set(v, d);
+    }
+
+    /// <summary>Fiches des versions précédentes : cotes et annotations ajoutées aux vues générées qui n'en ont pas.</summary>
+    private void CompleteAnnotations(JoineryType jt, Report report)
+    {
+        var idx = Identity.Index(_doc);
+        if (!idx.TryGetValue(Key(jt.Symbol) + "|ELEV", out var e) || e is not ViewSection elev || IsAnnotated(elev)) return;
+        var rep = Representative(jt);
+        if (rep == null) return;
+        var plan = idx.TryGetValue(Key(jt.Symbol) + "|PLAN", out var p) ? p as ViewPlan : null;
+        Annotate(jt, rep, elev, plan != null && !IsAnnotated(plan) ? plan : null, report);
+        report.Updated.Add($"Fiche {jt.Fiche?.SheetNumber} {jt.Mark} : cotes et annotations ajoutées aux vues générées");
     }
 
     private static string NormText(string s) => s.Replace("\r\n", "\r").Replace("\n", "\r").TrimEnd('\r', ' ');
