@@ -27,6 +27,7 @@ public sealed class Decision
     public List<string> Sources { get; set; } = new();
     public string? Modele { get; set; }
     public long? ElementId { get; set; }
+    public string StatutRevue { get; set; } = "non_revue";
 
     public string SourceLibelle => Libelle(Source, Modele);
 
@@ -50,6 +51,9 @@ public sealed class DecisionLog
     public DateTime Date { get; set; } = DateTime.Now;
     public string? Modele { get; set; }
     public double? CoutUsd { get; set; }
+    public int Requetes { get; set; }
+    public int Reparations { get; set; }
+    public long DureeRequetesMs { get; set; }
     public int JetonsEntree { get; set; }
     public int JetonsSortie { get; set; }
     public List<Decision> Decisions { get; set; } = new();
@@ -69,6 +73,8 @@ public sealed class DecisionLog
 
     public void Account(LlmResponse r)
     {
+        Requetes++;
+        DureeRequetesMs += r.ElapsedMilliseconds;
         JetonsEntree += r.PromptTokens;
         JetonsSortie += r.CompletionTokens;
         if (r.Cost.HasValue) CoutUsd = (CoutUsd ?? 0) + r.Cost.Value;
@@ -76,9 +82,9 @@ public sealed class DecisionLog
 
     public string ToCsv()
     {
-        var sb = new StringBuilder("Domaine;Objet;Décision;Source;Justification;Sources\r\n");
+        var sb = new StringBuilder("Domaine;Objet;Décision;Source;Justification;Sources;Revue\r\n");
         foreach (var d in Decisions)
-            sb.Append(string.Join(";", new[] { d.Domaine, d.Objet, d.Choix, d.SourceLibelle, d.Justification ?? "", string.Join(" ", d.Sources) }
+            sb.Append(string.Join(";", new[] { d.Domaine, d.Objet, d.Choix, d.SourceLibelle, d.Justification ?? "", string.Join(" ", d.Sources), d.StatutRevue }
                 .Select(DocumentRegister.Csv))).Append("\r\n");
         return sb.ToString();
     }

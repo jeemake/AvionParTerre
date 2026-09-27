@@ -67,7 +67,10 @@ public sealed class AutopilotCommand : CommandBase
         // 1. Analyse (lecture seule)
         var ap = new Autopilot(doc, data);
         ap.Analyze();
+        var selectedSteps = AvionParTerre.Core.Json.Serialize(ap.Steps);
         if (!ConfirmLaunch(ap)) return Result.Cancelled;
+        if (selectedSteps != AvionParTerre.Core.Json.Serialize(ap.Steps))
+            ap.Analyze(); // Rebuild only if the launch dialog changed the requested work.
 
         // 2. Consultation de l'IA (hors Revit)
         if (ap.UsesAi)
@@ -105,7 +108,7 @@ public sealed class AutopilotCommand : CommandBase
             tg.Start();
             ap.Execute(report, w, progress.Step, () => progress.Cancelled);
             tg.Assimilate();
-            if (ap.Steps.Registre)
+            if (ap.Steps.Registre && !progress.Cancelled)
             {
                 progress.Step("Registre documentaire…");
                 var svc = new RegisterService(doc, data);
@@ -204,7 +207,12 @@ public sealed class AutopilotCommand : CommandBase
             err.Click += (_, _) => MessageBox.Show(lw.Window, string.Join(Environment.NewLine, ap.AiErrors.Take(30)), "Avion par terre — alertes IA");
             lw.ExtraButtons.Children.Add(err);
         }
-        if (!lw.ShowDialog()) return false;
+        if (!lw.ShowDialog())
+        {
+            foreach (var row in rows) row.D.StatutRevue = "annulee";
+            return false;
+        }
+        foreach (var row in rows) row.D.StatutRevue = row.Selected ? "acceptee" : "refusee";
         // Les décisions décochées ne sont pas appliquées : on les retire des listes d'exécution via le journal
         var rejected = rows.Where(r => !r.Selected).Select(r => r.D).ToHashSet();
         if (rejected.Count > 0) ap.Reject(rejected);

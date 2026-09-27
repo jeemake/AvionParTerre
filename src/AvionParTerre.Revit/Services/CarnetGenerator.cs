@@ -67,7 +67,7 @@ internal sealed class CarnetGenerator
         return string.Join(Environment.NewLine, lines);
     }
 
-    public void Run(IReadOnlyList<Room> rooms, Report report, WarningCollector warnings)
+    public void Run(IReadOnlyList<Room> rooms, Report report, WarningCollector warnings, Action<Room, int>? progress = null, Func<bool>? cancelled = null)
     {
         var tb = _res.TitleBlock(_dce.FormatCarnets);
         if (tb == ElementId.InvalidElementId)
@@ -78,8 +78,12 @@ internal sealed class CarnetGenerator
         }
         _res.PrepareViewTitles(report.Created, warnings);
         var next = NextGroup(_doc);
+        int processed = 0;
         foreach (var room in rooms)
         {
+            if (cancelled?.Invoke() == true) break;
+            progress?.Invoke(room, ++processed);
+            if (cancelled?.Invoke() == true) break;
             if (!RevitUtil.IsEnclosed(room))
             {
                 report.Issue(Severity.Bloquant, "piece_non_fermee", RevitUtil.RoomLabel(room),

@@ -139,8 +139,9 @@ public sealed class FinitionsCommand : CommandBase
         {
             Key = r.Room.UniqueId, Name = r.Nom, Level = r.Niveau, AreaM2 = Units.ToM2(r.Room.Area), FamilyCode = r.FamilyCode,
             CandidateProfiles = r.Options.Where(o => o.Profile != null).Take(3).Select(o => o.Profile!.Id).ToList(),
-            Known = FinishSummary.RoomSupports.Select(x => (x, v: FinishService.Current(r.Room, x))).Where(x => x.v.Length > 0 && FinishService.ManualValues(r.Room).ContainsKey(x.x))
-                .ToDictionary(x => x.x, x => x.v),
+            Known = r.Edited
+                ? FinishSummary.RoomSupports.Where(x => !string.IsNullOrWhiteSpace(r.Get(x))).ToDictionary(x => x, r.Get)
+                : FinishService.ManualValues(r.Room),
         }).ToList();
         var log = new Core.Ai.DecisionLog { Document = doc.Title, Modele = s.Modele };
         var ctx = new Core.Ai.ProjectContext { Document = doc.Title, RoomNames = rows.Select(r => r.Nom).Distinct().ToList() };

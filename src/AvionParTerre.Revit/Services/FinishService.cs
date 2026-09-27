@@ -153,11 +153,8 @@ internal sealed class FinishService
                     continue;
                 }
                 desired = desired.Trim();
-                var a = ApplicationsFor(support, desired, it.Profile);
-                if (a.Count == 0) free.Add(support);
-                apps.AddRange(a);
                 var manual = current.Length > 0 && (!props.Values.TryGetValue(support, out var last) || last != current);
-                if (current == desired) { props.Values[support] = current; written[support] = current; continue; }
+                if (current == desired) { written[support] = current; continue; }
                 if (manual && !overwriteManual)
                 {
                     report.Kept.Add($"{label} / {support} : « {current} » conservé (saisie manuelle) — proposé : « {desired} »");
@@ -168,6 +165,16 @@ internal sealed class FinishService
                 props.Values[support] = desired;
                 written[support] = desired;
                 changed.Add(support);
+            }
+            // Record the actual model values, including preserved and read-only supports.
+            foreach (var (support, _) in Params)
+            {
+                var actual = Current(room, support);
+                if (string.IsNullOrWhiteSpace(actual)) continue;
+                written[support] = actual;
+                var applications = ApplicationsFor(support, actual, it.Profile);
+                apps.AddRange(applications);
+                if (applications.Count == 0) free.Add(support);
             }
             var src = it.Source == DecisionSource.Ia ? "ia" : it.Source == DecisionSource.Referentiel ? "referentiel" : "utilisateur";
             var rec = new RoomFinishRecord

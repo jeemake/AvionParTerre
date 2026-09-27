@@ -45,20 +45,27 @@ internal sealed class RoomDataService
         var rooms = RevitUtil.Rooms(_doc).Where(RevitUtil.IsEnclosed).ToList();
         var levelOf = rooms.ToDictionary(r => r.Id, r => _doc.GetElement(r.LevelId) as Level);
         var classifier = new RoomClassifier(_data.Catalogue.FamillesLocaux);
+        var names = rooms.ToDictionary(r => r.Id, r => TextNorm.Normalize(RevitUtil.RoomName(r)));
+        var families = rooms.ToDictionary(r => r.Id, r => classifier.Classify(RevitUtil.RoomName(r))?.FamilyCode);
+        var byLevel = rooms.ToLookup(r => r.LevelId);
+        var byName = rooms.ToLookup(r => names[r.Id]);
+        var values = rooms.ToDictionary(r => r.Id, r => new[] { "piece_niv", "piece_hsp", "piece_hsd" }.ToDictionary(k => k, k => Text(r, k)));
+        var ceilings = new Lazy<List<Element>>(() => new FilteredElementCollector(_doc).OfCategory(BuiltInCategory.OST_Ceilings).WhereElementIsNotElementType().ToList());
+        var floors = new Lazy<List<Floor>>(() => new FilteredElementCollector(_doc).OfClass(typeof(Floor)).Cast<Floor>().ToList());
         var reference = rooms.Select(r => levelOf[r.Id]).Where(l => l != null).GroupBy(l => l!.Id)
             .Select(g => g.First()!).OrderBy(l => LevelNaming.Designation(l.Name) == "REZ-DE-CHAUSSEE" ? 0 : 1).ThenBy(l => Math.Abs(l.Elevation)).FirstOrDefault();
         var list = new List<RoomDataProposal>();
 
         string? Common(IEnumerable<Room> pool, string key) =>
-            pool.Select(x => Text(x, key)).Where(v => v != null).GroupBy(v => v).OrderByDescending(g => g.Count()).Select(g => g.Key).FirstOrDefault();
+            pool.Select(x => values[x.Id][key]).Where(v => v != null).GroupBy(v => v).OrderByDescending(g => g.Count()).Select(g => g.Key).FirstOrDefault();
 
         foreach (var r in rooms)
         {
             var level = levelOf[r.Id];
-            var name = TextNorm.Normalize(RevitUtil.RoomName(r));
-            var sameLevel = rooms.Where(x => x.LevelId == r.LevelId && x.Id != r.Id).ToList();
-            var sameName = rooms.Where(x => x.Id != r.Id && TextNorm.Normalize(RevitUtil.RoomName(x)) == name).ToList();
-            var family = classifier.Classify(RevitUtil.RoomName(r))?.FamilyCode;
+            var name = names[r.Id];
+            var sameLevel = byLevel[r.LevelId].Where(x => x.Id != r.Id).ToList();
+            var sameName = byName[name].Where(x => x.Id != r.Id).ToList();
+            var family = families[r.Id];
 
             void Add(string key, string label, string? value, DecisionSource src, string why)
             {
@@ -81,17 +88,17 @@ internal sealed class RoomDataService
                 if (v == null) { v = Common(sameName, "piece_hsp"); why = "même local sur un autre niveau"; }
                 if (v == null && family != null)
                 {
-                    v = Common(sameLevel.Where(x => classifier.Classify(RevitUtil.RoomName(x))?.FamilyCode == family), "piece_hsp");
+                    v = Common(sameLevel.Where(x => families[x.Id] == family), "piece_hsp");
                     why = "valeur usuelle des locaux de la même famille sur le niveau";
                 }
                 if (v != null) Add("piece_hsp", "HSP", v, DecisionSource.Projet, why);
-                else if (CeilingHeight(r, level) is { } h) Add("piece_hsp", "HSP", h.ToString("0.00", Inv), DecisionSource.Regle, "hauteur du faux plafond modélisé");
+                else if (CeilingHeight(r, level, ceilings.Value) is { } h) Add("piece_hsp", "HSP", h.ToString("0.00", Inv), DecisionSource.Regle, "hauteur du faux plafond modélisé");
             }
             if (Text(r, "piece_hsd") == null)
             {
                 var v = Common(sameLevel, "piece_hsd");
                 if (v != null) Add("piece_hsd", "HSD", v, DecisionSource.Projet, $"valeur usuelle du niveau {level?.Name}");
-                else if (SlabHeight(r, level) is { } h) Add("piece_hsd", "HSD", h.ToString("0.00", Inv), DecisionSource.Regle, "sous-face du plancher haut modélisé");
+                else if (SlabHeight(r, level, floors.Value) is { } h) Add("piece_hsd", "HSD", h.ToString("0.00", Inv), DecisionSource.Regle, "sous-face du plancher haut modélisé");
             }
         }
         return list;
@@ -99,10 +106,10 @@ internal sealed class RoomDataService
 
     private XYZ? Center(Room r) => (r.Location as LocationPoint)?.Point;
 
-    private double? CeilingHeight(Room r, Level? level)
+    private double? CeilingHeight(Room r, Level? level, IEnumerable<Element> ceilings)
     {
         if (level == null || Center(r) is not { } c) return null;
-        foreach (var ce in new FilteredElementCollector(_doc).OfCategory(BuiltInCategory.OST_Ceilings).WhereElementIsNotElementType())
+        foreach (var ce in ceilings)
         {
             if (ce.LevelId != level.Id) continue;
             var bb = ce.get_BoundingBox(null);
@@ -113,11 +120,11 @@ internal sealed class RoomDataService
         return null;
     }
 
-    private double? SlabHeight(Room r, Level? level)
+    private double? SlabHeight(Room r, Level? level, IEnumerable<Floor> floors)
     {
         if (level == null || Center(r) is not { } c) return null;
         double? best = null;
-        foreach (var f in new FilteredElementCollector(_doc).OfClass(typeof(Floor)).Cast<Floor>())
+        foreach (var f in floors)
         {
             var bb = f.get_BoundingBox(null);
             if (bb == null || c.X < bb.Min.X || c.X > bb.Max.X || c.Y < bb.Min.Y || c.Y > bb.Max.Y) continue;
