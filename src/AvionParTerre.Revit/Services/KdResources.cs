@@ -40,6 +40,8 @@ internal sealed class KdResources
         new("gabarit_3d", "Gabarit vue 3D", ResourceKind.ViewTemplate),
         new("gabarit_calepin_plan", "Gabarit calepin (plan)", ResourceKind.ViewTemplate),
         new("gabarit_calepin_coupe", "Gabarit calepin (coupe)", ResourceKind.ViewTemplate),
+        new("gabarit_coupe", "Gabarit des coupes (plans généraux)", ResourceKind.ViewTemplate),
+        new("gabarit_facade", "Gabarit des façades (plans généraux)", ResourceKind.ViewTemplate),
         new("etiquette_piece_1_50", "Étiquette de pièce 1:50", ResourceKind.Symbol, BuiltInCategory.OST_RoomTags),
         new("etiquette_piece_1_100", "Étiquette de pièce 1:100", ResourceKind.Symbol, BuiltInCategory.OST_RoomTags),
         new("etiquette_piece_detail", "Étiquette de pièce (carnets)", ResourceKind.Symbol, BuiltInCategory.OST_RoomTags),
@@ -215,9 +217,10 @@ internal sealed class KdResources
     // Vues, textes
     // -----------------------------------------------------------------------------------------
 
-    public ElementId ViewTemplate(string key) => Resolve(key, name =>
+    /// <param name="optional">Ressource facultative : son absence est une simple information.</param>
+    public ElementId ViewTemplate(string key, bool optional = false) => Resolve(key, name =>
         new FilteredElementCollector(_doc).OfClass(typeof(View)).Cast<View>()
-            .FirstOrDefault(v => v.IsTemplate && TextNorm.SameResource(v.Name, name))?.Id);
+            .FirstOrDefault(v => v.IsTemplate && TextNorm.SameResource(v.Name, name))?.Id, optional: optional);
 
     public ElementId ViewFamilyType(string key, ViewFamily family) => Resolve(key, name =>
         new FilteredElementCollector(_doc).OfClass(typeof(ViewFamilyType)).Cast<ViewFamilyType>()
@@ -382,7 +385,7 @@ internal sealed class KdResources
     /// <summary>Gabarit de plan correspondant à l'échelle (APD-DCE_50e, _100e, _200e).</summary>
     public ElementId PlanTemplateForScale(int scale) => ViewTemplate($"gabarit_plan_1_{scale}");
 
-    private ElementId Resolve(string key, Func<string, ElementId?> find, Func<ElementId?>? fallback = null)
+    private ElementId Resolve(string key, Func<string, ElementId?> find, Func<ElementId?>? fallback = null, bool optional = false)
     {
         if (_cache.TryGetValue(key, out var id)) return id;
         var names = _profile.Resource(key).ToList();
@@ -397,7 +400,7 @@ internal sealed class KdResources
             }
         }
         var fb = fallback?.Invoke();
-        var sev = fb != null ? Severity.Information : Severity.ARevoir;
+        var sev = fb != null || optional ? Severity.Information : Severity.ARevoir;
         Missing.Add(new Issue(sev, "ressource_kd", key,
             names.Count == 0
                 ? $"Aucun nom de ressource défini pour « {key} » dans profile.json."

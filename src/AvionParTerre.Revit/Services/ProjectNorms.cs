@@ -44,6 +44,9 @@ internal sealed class ProjectNorms
     /// <summary>Numérotation des plans : préfixe et premier index (« 1. » + 10 pour 1.10, 1.11…).</summary>
     public string? PlanNumberPrefix { get; private set; }
     public int PlanNumberDigits { get; private set; } = 2;
+    /// <summary>Feuilles de coupes et de façades existantes de l'agence (non gérées par le plugin).</summary>
+    public ViewSheet? SectionSheet { get; private set; }
+    public ViewSheet? ElevationSheet { get; private set; }
     /// <summary>Niveau → feuille de plan général existante de l'agence (non gérée par le plugin).</summary>
     public Dictionary<ElementId, ViewSheet> PlanSheetByLevel { get; } = new();
     public Dictionary<string, FicheNorm> Fiches { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -78,8 +81,21 @@ internal sealed class ProjectNorms
         var sheets = new FilteredElementCollector(doc).OfClass(typeof(ViewSheet)).Cast<ViewSheet>()
             .Where(s => !s.IsPlaceholder && !managed.Contains(s.Id)).ToList();
         n.DetectPlans(doc, data, sheets);
+        n.DetectSectionsElevations(doc, sheets);
         n.DetectFiches(doc, data, sheets);
         return n;
+    }
+
+    /// <summary>Feuille « COUPE… » portant une coupe, feuille « FACADE… » / « ELEVATION… » portant une élévation.</summary>
+    private void DetectSectionsElevations(Document doc, List<ViewSheet> sheets)
+    {
+        bool Has(ViewSheet s, ViewType type) => s.GetAllPlacedViews().Any(id => doc.GetElement(id) is View v && v.ViewType == type);
+        foreach (var s in sheets)
+        {
+            var name = TextNorm.Normalize(s.Name);
+            if (SectionSheet == null && name.StartsWith("coupe") && Has(s, ViewType.Section)) SectionSheet = s;
+            if (ElevationSheet == null && (name.StartsWith("facade") || name.StartsWith("elevation")) && Has(s, ViewType.Elevation)) ElevationSheet = s;
+        }
     }
 
     private static string? Param(ViewSheet s, IEnumerable<string> names)
@@ -201,6 +217,8 @@ internal sealed class ProjectNorms
                 yield return $"  niveau « {doc.GetElement(lvl)?.Name} » déjà couvert par la feuille {s.SheetNumber} {s.Name}";
         }
         else yield return "Plans généraux : aucune feuille de plan existante (convention du profil).";
+        if (SectionSheet != null) yield return $"Coupes : feuille de l'agence {SectionSheet.SheetNumber} {SectionSheet.Name} (conservée, non dupliquée)";
+        if (ElevationSheet != null) yield return $"Façades : feuille de l'agence {ElevationSheet.SheetNumber} {ElevationSheet.Name} (conservée, non dupliquée)";
         foreach (var f in Fiches.Values.OrderBy(f => f.Lot))
             yield return $"Fiches {f.Lot} : numéros « {f.Prefix}{new string('n', f.Digits)} » (prochain {f.Number(f.NextIndex)}), nom de feuille = repère, " +
                          $"cartouche « {Name(f.TitleBlock)} », Phase « {f.Phase ?? "—"} », titre « {Name(f.TitleTextType)} » — {f.Samples} fiche(s) existante(s)";

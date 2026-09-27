@@ -240,11 +240,25 @@ public sealed class PlansCommand : CommandBase
         List<PlanRequest> Requests(IEnumerable<LevelRow> sel) =>
             sel.OrderBy(r => r.Level.Elevation).Select(r => new PlanRequest { Level = r.Level, Index = levels.IndexOf(r.Level), Force = true }).ToList();
 
+        // Coupes et façades : proposées sauf si l'agence a déjà ses feuilles (cocher pour les générer quand même)
+        var coupes = new CheckBox { Content = "Coupes A-A et B-B", IsChecked = norms.SectionSheet == null, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(16, 0, 0, 0) };
+        var facades = new CheckBox { Content = "Façades", IsChecked = norms.ElevationSheet == null, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
+        SectionElevationRequest Sections() => new()
+        {
+            Coupes = coupes.IsChecked == true, Facades = facades.IsChecked == true,
+            // Case cochée alors que l'agence a déjà ses feuilles : choix explicite de l'utilisateur
+            Force = (coupes.IsChecked == true && norms.SectionSheet != null) || (facades.IsChecked == true && norms.ElevationSheet != null),
+        };
+
         var lw = new ListWindow<LevelRow>("Plans généraux DCE",
-            "Une vue par niveau avec gabarit APD-DCE et étiquettes K&D, sur la grande feuille des normes du projet. Les niveaux déjà couverts par un plan de l'agence sont décochés.",
-            rows, "Générer / mettre à jour", sel => new PlanGenerator(doc, data, Dce(), norms).Preview(Requests(sel)));
+            "Une vue par niveau avec gabarit APD-DCE et étiquettes K&D, sur la grande feuille des normes du projet, puis les coupes et les façades. Les niveaux déjà couverts par un plan de l'agence sont décochés.",
+            rows, "Générer / mettre à jour", sel => string.Join(Environment.NewLine,
+                new[] { new PlanGenerator(doc, data, Dce(), norms).Preview(Requests(sel)) }
+                    .Concat(new SectionElevationGenerator(doc, data, Dce(), norms).Preview(Sections()))));
         profileCombo = Controls.Combo(profiles, p => p.Libelle, Math.Max(0, preferred), 460);
         lw.Options.Children.Add(Controls.Labeled("Profil documentaire", profileCombo));
+        lw.Options.Children.Add(coupes);
+        lw.Options.Children.Add(facades);
         if (!lw.ShowDialog()) return Result.Cancelled;
 
         var report = new Report($"Plans généraux — {Dce().Code}");
@@ -253,6 +267,8 @@ public sealed class PlansCommand : CommandBase
         {
             tg.Start();
             new PlanGenerator(doc, data, Dce(), norms).Run(Requests(lw.Selection), report, w);
+            new SectionElevationGenerator(doc, data, Dce(), norms).Run(Sections(), report, w);
+            new BrowserFolders(doc, data).Arrange(report, w);
             tg.Assimilate();
         }
         report.RevitWarnings.AddRange(w.Warnings);
@@ -311,7 +327,7 @@ public sealed class CarnetsCommand : CommandBase
         ComboBox? profileCombo = null;
         DceProfile Dce() => Controls.Value<DceProfile>(profileCombo!) ?? data.Profile.ProfilsDce[0];
         var lw = new ListWindow<RoomRow>("Carnets de pièces",
-            "Plan agrandi, vue 3D découpée, tableau de pièce et élévations a–d sur A3 (Dn.00, Dn.01…). Proposition : sanitaires, cuisines, habitation, accueil — ou la sélection Revit.",
+            "Plan agrandi coté, vue 3D découpée, tableau de pièce et élévations a–d cotées sur A3 (Dn.00, Dn.01…). Proposition : sanitaires, cuisines, habitation, accueil — ou la sélection Revit.",
             rows, "Générer les carnets", sel => new CarnetGenerator(doc, data, Dce()).Preview(sel.Select(r => r.Room)));
         profileCombo = Controls.Combo(data.Profile.ProfilsDce, p => p.Libelle, 0, 420);
         lw.Options.Children.Add(Controls.Labeled("Profil documentaire", profileCombo));
@@ -323,6 +339,7 @@ public sealed class CarnetsCommand : CommandBase
         {
             tg.Start();
             new CarnetGenerator(doc, data, Dce()).Run(lw.Selection.Select(r => r.Room).ToList(), report, w);
+            new BrowserFolders(doc, data).Arrange(report, w);
             tg.Assimilate();
         }
         report.RevitWarnings.AddRange(w.Warnings);
@@ -369,7 +386,7 @@ public sealed class FichesCommand : CommandBase
             return Result.Cancelled;
         }
         var lw = new ListWindow<JoineryRow>("Fiches menuiseries",
-            "Une fiche A3 par type : vue de dessin K&D du même nom si elle existe, sinon élévation + plan (gabarits Calepin Baies), localisations et quantités.",
+            "Une fiche A3 par type : vue de dessin K&D du même nom si elle existe, sinon élévation + plan cotés et annotés (quincaillerie, matériaux), localisations et quantités.",
             rows, "Générer / mettre à jour", sel => string.Join(Environment.NewLine, sel.Select(r =>
                 r.Type.Lot == null ? $"{r.Repere} : lot inconnu — ignoré"
                 : r.Type.Fiche != null ? $"{r.Repere} : fiche {r.Fiche} existante — bloc descriptif mis à jour si non retouché"
@@ -384,6 +401,7 @@ public sealed class FichesCommand : CommandBase
         {
             tg.Start();
             gen.Run(lw.Selection.Select(r => r.Type).ToList(), report, w);
+            new BrowserFolders(doc, data).Arrange(report, w);
             tg.Assimilate();
         }
         report.RevitWarnings.AddRange(w.Warnings);

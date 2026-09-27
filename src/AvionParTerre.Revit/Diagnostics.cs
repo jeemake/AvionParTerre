@@ -159,6 +159,15 @@ public static class Diagnostics
             fgen.Run(types, fir, w);
             sb.AppendLine(fir.ToText());
 
+            // 4b. Coupes et façades, puis rangement du navigateur (dossier DCE)
+            var sr = new Report("Coupes et façades");
+            new SectionElevationGenerator(doc, data, planDce, norms).Run(new SectionElevationRequest { Coupes = true, Facades = true, Force = true }, sr, w);
+            new BrowserFolders(doc, data).Arrange(sr, w);
+            sb.AppendLine(sr.ToText());
+            foreach (var dim in new FilteredElementCollector(doc).OfClass(typeof(Dimension)).Cast<Dimension>()
+                         .GroupBy(d => doc.GetElement(d.OwnerViewId) is View ov && Identity.Get(ov) is { } id ? id.Role : null).Where(g => g.Key != null))
+                sb.AppendLine($"COTES {dim.Key} : {dim.Count()}");
+
             var afterFirst = RevitUtil.SheetNumbers(doc).Count;
 
             // 5. Relance : aucune feuille supplémentaire attendue

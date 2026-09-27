@@ -8,7 +8,7 @@
     <LangVersion>latest</LangVersion>
     <RootNamespace>AvionParTerre.Revit</RootNamespace>
     <AssemblyName>AvionParTerre</AssemblyName>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
     <PlatformTarget>x64</PlatformTarget>
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
