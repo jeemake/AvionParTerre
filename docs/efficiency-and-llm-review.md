@@ -24,6 +24,20 @@ This change implements a first set of fixes, adds regression coverage and a repe
 | Medium | Rejecting a classification could still persist it via its finish assignment; logs did not distinguish rejected proposals. | Remove the dependent finish assignment and record review status in JSON/CSV. Review status is distinct from execution success. |
 | Medium | An oversized but short view could share its page despite the packer's documented behavior. | Reserve that page exclusively for the oversized item, with a regression test. |
 
+## Corrections après fusion (revue du 27 septembre 2026)
+
+Défauts reproduits par des tests avant correction, puis corrigés :
+
+| Défaut | Correction |
+|---|---|
+| Avec `require_parameters`, un modèle sans fournisseur compatible `json_schema` recevait d'OpenRouter `404 No endpoints found that can handle the requested parameters` ; le repli ne reconnaissait que « response_format … unsupported » : **toutes les requêtes échouaient** pour ce modèle. | Repli en trois crans, mémorisé par modèle pour la session : `json_schema` + `require_parameters` → `json_object` sans contrainte de fournisseur → texte libre. Le 404 ci-dessus et les messages « does not support response_format / json_schema » déclenchent le cran suivant ; l'authentification, le crédit et le schéma mal formé jamais. |
+| Le regroupement des locaux incluait le niveau et la surface exacte : 40 « Chambre » de surfaces voisines sur 4 niveaux donnaient 40 contextes (plus de jetons, finitions potentiellement différentes d'un étage à l'autre). | Contexte = libellé, famille, profils candidats, valeurs déjà saisies et **classe de taille** (< 4, < 10, < 25, < 60, < 150 m², au-delà). Même exemple : 2 contextes (les chambres courantes, la suite de 45 m²). |
+| La réparation se fait sans recherche internet ; les sources n'étaient comparées qu'aux citations de la réponse réparée : **les sources trouvées au premier appel disparaissaient**. Comparaison stricte des URL (barre finale, `www.`, http/https). | Citations cumulées sur toutes les tentatives ; URL comparées sans protocole, `www.`, fragment ni barre finale. Une URL absente des citations reste rejetée. |
+
+Améliorations associées : réponse tronquée (`finish_reason: length`, fréquente avec les modèles qui raisonnent) relancée une fois avec un budget doublé (plafond 16 000 jetons, comptée dans les réparations) ; requêtes parallèles en **file continue** (un paquet démarre dès qu'un autre se termine, un paquet lent ne bloque plus la vague suivante ; ordre des résultats conservé) ; nouvelle analyse du mode avion par terre : profil documentaire, origine de la bibliothèque, carnets, niveaux, coupes et façades réinitialisés puis rejournalisés.
+
+Vérification : 101 tests du cœur (`dotnet test`), adaptateur Revit compilé contre l'API Revit 2025 (références NuGet), benchmark inchangé (80 locaux distincts, 8 requêtes, 2 en parallèle). Aucun appel OpenRouter réel ; essai Revit toujours à faire.
+
 ## Implemented performance improvements
 
 - Classified-room prompts include matching families and explicitly nominated candidates, rather than every profile. Unclassified rooms retain the full profile set so retrieval does not suppress possible classifications. Send finish options only for supports missing somewhere in the batch. Precompute profile summaries and normalized finish lookups per advisor.
