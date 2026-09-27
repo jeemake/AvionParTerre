@@ -40,8 +40,10 @@ public sealed class LlmException : Exception
 {
     public HttpStatusCode? StatusCode { get; }
     public TimeSpan? RetryAfter { get; }
-    public LlmException(string message, Exception? inner = null, HttpStatusCode? statusCode = null, TimeSpan? retryAfter = null)
-        : base(message, inner) { StatusCode = statusCode; RetryAfter = retryAfter; }
+    /// <summary>Réponse coupée par la limite de jetons (finish_reason « length ») : relançable avec un budget plus large.</summary>
+    public bool Truncated { get; }
+    public LlmException(string message, Exception? inner = null, HttpStatusCode? statusCode = null, TimeSpan? retryAfter = null, bool truncated = false)
+        : base(message, inner) { StatusCode = statusCode; RetryAfter = retryAfter; Truncated = truncated; }
 }
 
 public interface ILlmClient
@@ -68,7 +70,11 @@ public sealed class OpenRouterClient : ILlmClient, IDisposable
     private static readonly SocketsHttpHandler SharedHandler = new() { PooledConnectionLifetime = TimeSpan.FromMinutes(5) };
     private readonly HttpClient _http;
     private readonly TimeSpan _timeout;
-    private readonly ConcurrentDictionary<string, byte> _plainJsonModels = new(StringComparer.Ordinal);
+    /// <summary>Format de sortie le plus exigeant accepté par chaque modèle, relevé pendant la session.</summary>
+    private readonly ConcurrentDictionary<string, OutputFormat> _formatByModel = new(StringComparer.Ordinal);
+
+    /// <summary>Formats de sortie, du plus strict au plus permissif ; la validation locale s'applique dans tous les cas.</summary>
+    private enum OutputFormat { Schema, JsonObject, Plain }
 
     public OpenRouterClient(string? apiKey, TimeSpan? timeout = null, HttpMessageHandler? handler = null)
     {
@@ -127,7 +133,8 @@ public sealed class OpenRouterClient : ILlmClient, IDisposable
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
         budget.CancelAfter(_timeout);
         var clock = Stopwatch.StartNew();
-        var jsonMode = request.JsonMode && !_plainJsonModels.ContainsKey(request.Model);
+        var format = !request.JsonMode ? OutputFormat.Plain : request.ResponseSchema != null ? OutputFormat.Schema : OutputFormat.JsonObject;
+        if (_formatByModel.TryGetValue(request.Model, out var known) && known > format) format = known;
         var retried = false;
         try
         {
@@ -135,15 +142,16 @@ public sealed class OpenRouterClient : ILlmClient, IDisposable
             {
                 try
                 {
-                    var response = await SendAsync(request, jsonMode, budget.Token).ConfigureAwait(false);
+                    var response = await SendAsync(request, format, budget.Token).ConfigureAwait(false);
                     response.ElapsedMilliseconds = clock.ElapsedMilliseconds;
                     return response;
                 }
-                catch (LlmException ex) when (jsonMode && UnsupportedFormat(ex))
+                catch (LlmException ex) when (format != OutputFormat.Plain && UnsupportedFormat(ex))
                 {
-                    // Explicit unsupported-format rejection only; never downgrade auth, quota, or malformed-schema errors.
-                    jsonMode = false;
-                    _plainJsonModels.TryAdd(request.Model, 0);
+                    // Refus explicite du format (ou aucun fournisseur du modèle ne l'accepte) : un cran plus permissif,
+                    // mémorisé pour le modèle. Jamais pour une erreur d'authentification, de crédit ou de schéma mal formé.
+                    format++;
+                    _formatByModel.AddOrUpdate(request.Model, format, (_, old) => old > format ? old : format);
                 }
                 catch (LlmException ex) when (!retried && ex.StatusCode is HttpStatusCode.TooManyRequests or
                     HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout)
@@ -170,12 +178,20 @@ public sealed class OpenRouterClient : ILlmClient, IDisposable
         }
     }
 
-    private static bool UnsupportedFormat(LlmException ex) =>
-        ex.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.NotFound or HttpStatusCode.UnprocessableEntity &&
-        (ex.Message.Contains("response_format", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("structured output", StringComparison.OrdinalIgnoreCase)) &&
-        (ex.Message.Contains("not support", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("unsupported", StringComparison.OrdinalIgnoreCase));
+    /// <summary>
+    /// Format refusé : message explicite (« response_format … not supported »), ou réponse d'OpenRouter quand
+    /// <c>require_parameters</c> écarte tous les fournisseurs du modèle (404 « No endpoints found that can handle the requested parameters »).
+    /// </summary>
+    private static bool UnsupportedFormat(LlmException ex)
+    {
+        if (ex.StatusCode is not (HttpStatusCode.BadRequest or HttpStatusCode.NotFound or HttpStatusCode.UnprocessableEntity)) return false;
+        bool Has(string s) => ex.Message.Contains(s, StringComparison.OrdinalIgnoreCase);
+        if (Has("no endpoints found") && (Has("requested parameters") || Has("require_parameters"))) return true;
+        return (Has("response_format") || Has("structured output") || Has("json_schema") || Has("json mode")) &&
+               (Has("not support") || Has("unsupported") || Has("does not support"));
+    }
 
-    private async Task<LlmResponse> SendAsync(LlmRequest request, bool jsonMode, CancellationToken ct)
+    private async Task<LlmResponse> SendAsync(LlmRequest request, OutputFormat format, CancellationToken ct)
     {
         var body = new JsonObject
         {
@@ -185,17 +201,18 @@ public sealed class OpenRouterClient : ILlmClient, IDisposable
             ["messages"] = new JsonArray(request.Messages.Select(m => (JsonNode)new JsonObject { ["role"] = m.Role, ["content"] = m.Content }).ToArray()),
             ["usage"] = new JsonObject { ["include"] = true },
         };
-        if (jsonMode)
+        if (format == OutputFormat.Schema && request.ResponseSchema != null)
         {
-            body["response_format"] = request.ResponseSchema == null
-                ? new JsonObject { ["type"] = "json_object" }
-                : new JsonObject
-                {
-                    ["type"] = "json_schema",
-                    ["json_schema"] = new JsonObject { ["name"] = "avion_decisions", ["strict"] = true, ["schema"] = request.ResponseSchema.DeepClone() },
-                };
+            body["response_format"] = new JsonObject
+            {
+                ["type"] = "json_schema",
+                ["json_schema"] = new JsonObject { ["name"] = "avion_decisions", ["strict"] = true, ["schema"] = request.ResponseSchema.DeepClone() },
+            };
+            // Seuls les fournisseurs qui appliquent le schéma ; à défaut, repli sur json_object sans cette contrainte.
             body["provider"] = new JsonObject { ["require_parameters"] = true };
         }
+        else if (format != OutputFormat.Plain)
+            body["response_format"] = new JsonObject { ["type"] = "json_object" };
         if (request.WebSearch)
             body["plugins"] = new JsonArray(new JsonObject { ["id"] = "web", ["max_results"] = request.WebMaxResults });
 
@@ -212,7 +229,8 @@ public sealed class OpenRouterClient : ILlmClient, IDisposable
                 throw new LlmException("OpenRouter : aucune réponse du modèle.");
             var finishReason = JsonExtract.Str(choice, "finish_reason");
             if (finishReason is "length" or "content_filter" or "error")
-                throw new LlmException($"OpenRouter : réponse incomplète ou refusée ({finishReason}), aucune décision appliquée.");
+                throw new LlmException($"OpenRouter : réponse incomplète ou refusée ({finishReason}), aucune décision appliquée.",
+                    truncated: finishReason == "length");
             var msg = choice["message"] as JsonObject;
             if (msg == null || !string.IsNullOrEmpty(JsonExtract.Str(msg, "refusal")))
                 throw new LlmException("OpenRouter : réponse refusée ou absente.");

@@ -424,32 +424,72 @@ public sealed class AutopilotAdvisor
 
     // -----------------------------------------------------------------------------------------
 
-    // Only semantically identical rooms can share a decision. JSON avoids delimiter collisions.
-    private static string RoomSignature(RoomInput r) => JsonSerializer.Serialize(new
+    /// <summary>
+    /// Contexte de décision d'un local : les locaux de même contexte reçoivent une seule réponse (les « Chambre » des étages
+    /// courants sont traitées de la même façon). Le libellé, la famille, les profils candidats et les valeurs déjà saisies comptent ;
+    /// le niveau non, et la surface par classe de taille seulement (une différence de quelques centimètres carrés ne change rien).
+    /// </summary>
+    public static string RoomSignature(RoomInput r) => JsonSerializer.Serialize(new
     {
-        Name = TextNorm.Normalize(r.Name), r.Level, r.AreaM2, r.FamilyCode,
+        Name = TextNorm.Normalize(r.Name), r.FamilyCode, Taille = SizeClass(r.AreaM2),
         Candidates = r.CandidateProfiles.OrderBy(x => x, StringComparer.Ordinal),
         Known = r.Known.OrderBy(x => x.Key, StringComparer.Ordinal),
     });
+
+    /// <summary>Classe de taille : placard, local de service, pièce courante, grande pièce, salle, hall.</summary>
+    public static int SizeClass(double areaM2) => areaM2 switch
+    {
+        < 4 => 0,
+        < 10 => 1,
+        < 25 => 2,
+        < 60 => 3,
+        < 150 => 4,
+        _ => 5,
+    };
+
+    /// <summary>URL comparable : sans protocole, « www. », fragment ni barre finale (les citations et les sources du modèle diffèrent souvent ainsi).</summary>
+    public static string UrlKey(string url)
+    {
+        var u = url.Trim();
+        if (!Uri.TryCreate(u, UriKind.Absolute, out var uri)) return u.TrimEnd('/').ToLowerInvariant();
+        var host = uri.Host.ToLowerInvariant();
+        if (host.StartsWith("www.", StringComparison.Ordinal)) host = host[4..];
+        return host + uri.AbsolutePath.TrimEnd('/') + uri.Query;
+    }
 
     private async IAsyncEnumerable<(T Batch, JsonNode? Node, LlmException? Error)> FetchBatches<T>(
         IReadOnlyList<T> batches, Func<T, string> prompt, Func<T, bool> web,
         Func<T, ResponseContract> contract, Func<T, int> tokens,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
+        // File continue : au plus N requêtes en vol, un paquet démarre dès qu'un autre se termine (un paquet lent ne bloque pas
+        // la vague suivante) ; résultats rendus dans l'ordre des paquets.
+        using var gate = new SemaphoreSlim(Math.Clamp(_opt.MaxConcurrentRequests, 1, 4));
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
         async Task<(T Batch, JsonNode? Node, LlmException? Error)> Fetch(T batch)
         {
-            try { return (batch, await AskAsync(prompt(batch), web(batch), ct, contract(batch), tokens(batch)).ConfigureAwait(false), null); }
+            await gate.WaitAsync(stop.Token).ConfigureAwait(false);
+            try { return (batch, await AskAsync(prompt(batch), web(batch), stop.Token, contract(batch), tokens(batch)).ConfigureAwait(false), null); }
             catch (LlmException ex) { return (batch, null, ex); }
+            finally { gate.Release(); }
         }
-        // Bound both in-flight work and queued requests; results are consumed in input order.
-        foreach (var window in batches.Chunk(Math.Clamp(_opt.MaxConcurrentRequests, 1, 4)))
+        var tasks = batches.Select(Fetch).ToList();
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            foreach (var result in await Task.WhenAll(window.Select(Fetch)).ConfigureAwait(false))
-                yield return result;
+            foreach (var task in tasks)
+                yield return await task.ConfigureAwait(false);
+        }
+        finally
+        {
+            // Abandon (annulation, exception du consommateur) : les paquets en attente ne partent pas.
+            stop.Cancel();
+            try { await Task.WhenAll(tasks).ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
         }
     }
+
+    /// <summary>Plafond de jetons de sortie d'une requête, relance après troncature comprise.</summary>
+    private const int MaxOutputTokens = 16000;
 
     private async Task<JsonNode?> AskAsync(string prompt, bool web, CancellationToken ct, ResponseContract contract, int maxTokens)
     {
@@ -462,21 +502,39 @@ public sealed class AutopilotAdvisor
         };
         req.Messages.Add(new LlmMessage("system", SystemPrompt));
         req.Messages.Add(new LlmMessage("user", prompt));
+        // Pages réellement consultées par la recherche internet, sur toutes les tentatives : la réparation se fait sans
+        // recherche, elle ne doit pas effacer les sources trouvées au premier appel.
+        var evidence = new HashSet<string>(StringComparer.Ordinal);
+        var widened = false;
         try
         {
             for (var attempt = 0; ; attempt++)
             {
-                var r = await _llm.CompleteAsync(req, budget.Token).ConfigureAwait(false);
+                LlmResponse r;
+                try
+                {
+                    r = await _llm.CompleteAsync(req, budget.Token).ConfigureAwait(false);
+                }
+                catch (LlmException ex) when (ex.Truncated && !widened && req.MaxTokens < MaxOutputTokens)
+                {
+                    // Réponse coupée (modèles qui raisonnent avant de répondre) : une relance avec un budget doublé.
+                    widened = true;
+                    req.MaxTokens = Math.Min(MaxOutputTokens, req.MaxTokens * 2);
+                    lock (_log) _log.Reparations++;
+                    attempt--;
+                    continue;
+                }
                 lock (_log) _log.Account(r);
+                foreach (var c in r.Citations) evidence.Add(UrlKey(c));
                 var node = JsonExtract.FirstObject(r.Content);
                 var error = contract.Validate(node);
                 if (error == null)
                 {
-                    // Provider citations are evidence of retrieval, not proof that every room used each source.
+                    // Une source n'est gardée que si la recherche l'a réellement renvoyée (pas d'URL inventée).
                     if (node?["pieces"] is JsonArray arr)
                         foreach (var room in arr.OfType<JsonObject>())
                             room["sources"] = new JsonArray(JsonExtract.StrList(room, "sources")
-                                .Where(url => r.Citations.Contains(url, StringComparer.Ordinal)).Distinct()
+                                .Where(url => evidence.Contains(UrlKey(url))).Distinct()
                                 .Select(url => (JsonNode)JsonValue.Create(url)!).ToArray());
                     return node;
                 }

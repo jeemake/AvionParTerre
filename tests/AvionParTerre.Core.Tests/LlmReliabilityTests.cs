@@ -150,13 +150,32 @@ public class LlmReliabilityTests
             Interlocked.Decrement(ref active);
             return Answer("{\"pieces\":[{\"id\":\"" + id + "\"}]}");
         });
-        var rooms = Enumerable.Range(0, 6).Select(i => { var r = Room("r" + i); r.AreaM2 += i; return r; }).ToArray();
+        var rooms = Enumerable.Range(0, 6).Select(i => { var r = Room("r" + i); r.Name = "Bureau " + i; return r; }).ToArray();
         var log = new DecisionLog();
         var result = await Advisor(llm, new AiOptions { BatchSize = 1, MaxConcurrentRequests = 2 }, log).AdviseRoomsAsync(rooms, null, new());
         Assert.Equal(2, peak);
         Assert.Equal(rooms.Select(r => r.Key), result.Select(r => r.Key));
         Assert.Equal(6, log.Requetes);
         Assert.Equal(60, log.JetonsEntree);
+    }
+
+    [Fact]
+    public async Task Slow_batch_does_not_hold_back_the_next_ones()
+    {
+        var slowDone = false; var startedWhileSlow = 0;
+        var llm = new FakeLlm(async (r, ct) =>
+        {
+            var prompt = r.Messages[1].Content;
+            var id = Enumerable.Range(0, 3).Select(i => "r" + i).Single(x => prompt.Contains("\"id\":\"" + x + "\""));
+            if (id != "r0" && !Volatile.Read(ref slowDone)) Interlocked.Increment(ref startedWhileSlow);
+            await Task.Delay(id == "r0" ? 400 : 20, ct);
+            if (id == "r0") Volatile.Write(ref slowDone, true);
+            return Answer("{\"pieces\":[{\"id\":\"" + id + "\"}]}");
+        });
+        var rooms = Enumerable.Range(0, 3).Select(i => { var r = Room("r" + i); r.Name = "Bureau " + i; return r; }).ToArray();
+        var result = await Advisor(llm, new AiOptions { BatchSize = 1, MaxConcurrentRequests = 2 }).AdviseRoomsAsync(rooms, null, new());
+        Assert.Equal(2, startedWhileSlow); // r1 puis r2 partent pendant que r0 est en cours
+        Assert.Equal(rooms.Select(r => r.Key), result.Select(r => r.Key));
     }
 
     [Fact]
@@ -202,26 +221,116 @@ public class LlmReliabilityTests
         Assert.Equal(1, handler.Calls);
     }
 
+    private static string? Format(JsonNode body) => body["response_format"]?["type"]?.GetValue<string>();
+
     [Fact]
     public async Task Schema_sent_and_explicit_unsupported_format_cached_for_session()
     {
-        var formats = new List<bool>();
+        var formats = new List<string?>();
         var handler = new Handler(async (req, n, ct) =>
         {
             var body = JsonNode.Parse(await req.Content!.ReadAsStringAsync(ct))!;
-            formats.Add(body["response_format"] != null);
+            formats.Add(Format(body));
             if (n == 1)
             {
-                Assert.Equal("json_schema", body["response_format"]!["type"]!.GetValue<string>());
                 Assert.True(body["provider"]!["require_parameters"]!.GetValue<bool>());
                 return Http("{\"error\":{\"message\":\"response_format unsupported\"}}", HttpStatusCode.BadRequest);
             }
+            Assert.Null(body["provider"]); // json_object : aucun fournisseur écarté
             return Http(Ok);
         });
         using var client = new OpenRouterClient("test-key", handler: handler);
         await client.CompleteAsync(Request()); await client.CompleteAsync(Request());
-        Assert.Equal(new[] { true, false, false }, formats);
+        Assert.Equal(new[] { "json_schema", "json_object", "json_object" }, formats);
     }
+
+    [Fact]
+    public async Task No_endpoint_for_required_parameters_falls_back_instead_of_failing()
+    {
+        // Réponse réelle d'OpenRouter quand require_parameters écarte tous les fournisseurs du modèle
+        const string noEndpoint = "{\"error\":{\"message\":\"No endpoints found that can handle the requested parameters. To learn more about provider routing, visit: https://openrouter.ai/docs/provider-routing\",\"code\":404}}";
+        var formats = new List<string?>();
+        var handler = new Handler(async (req, _, ct) =>
+        {
+            var body = JsonNode.Parse(await req.Content!.ReadAsStringAsync(ct))!;
+            formats.Add(Format(body));
+            return Format(body) == "json_schema" ? Http(noEndpoint, HttpStatusCode.NotFound) : Http(Ok);
+        });
+        using var client = new OpenRouterClient("test-key", handler: handler);
+        Assert.Equal("{}", (await client.CompleteAsync(Request())).Content);
+        await client.CompleteAsync(Request());
+        Assert.Equal(new[] { "json_schema", "json_object", "json_object" }, formats);
+    }
+
+    [Fact]
+    public async Task Json_object_also_refused_falls_back_to_plain_text()
+    {
+        var formats = new List<string?>();
+        var handler = new Handler(async (req, _, ct) =>
+        {
+            var body = JsonNode.Parse(await req.Content!.ReadAsStringAsync(ct))!;
+            formats.Add(Format(body));
+            return Format(body) != null ? Http("{\"error\":{\"message\":\"This model does not support response_format\"}}", HttpStatusCode.BadRequest) : Http(Ok);
+        });
+        using var client = new OpenRouterClient("test-key", handler: handler);
+        await client.CompleteAsync(Request()); await client.CompleteAsync(Request());
+        Assert.Equal(new[] { "json_schema", "json_object", null, null }, formats);
+    }
+
+    [Fact]
+    public async Task Truncated_answer_is_retried_once_with_a_larger_budget()
+    {
+        var budgets = new List<int>();
+        var llm = new FakeLlm((r, _) =>
+        {
+            budgets.Add(r.MaxTokens);
+            if (budgets.Count == 1) throw new LlmException("coupée", truncated: true);
+            return Task.FromResult(Answer("{\"pieces\":[{\"id\":\"r1\"}]}"));
+        });
+        var log = new DecisionLog();
+        Assert.Single(await Advisor(llm, log: log).AdviseRoomsAsync(new[] { Room() }, null, new()));
+        Assert.Equal(2, budgets.Count);
+        Assert.Equal(budgets[0] * 2, budgets[1]);
+        Assert.Equal(1, log.Reparations);
+    }
+
+    [Fact]
+    public async Task Repeated_room_names_share_one_context_across_levels()
+    {
+        var contexts = new List<int>();
+        var llm = new FakeLlm((r, _) =>
+        {
+            var ids = System.Text.RegularExpressions.Regex.Matches(r.Messages[1].Content, "\"id\":\"(r\\d+)\"").Select(m => m.Groups[1].Value).ToList();
+            contexts.Add(ids.Count);
+            return Task.FromResult(Answer(JsonSerializer.Serialize(new { pieces = ids.Select(id => new { id, sol = "Carrelage grès cérame" }) })));
+        });
+        // 40 chambres sur 4 niveaux, surfaces voisines ; une suite parentale nettement plus grande reste à part
+        var rooms = Enumerable.Range(0, 40).Select(i => { var r = Room("r" + i); r.Name = "Chambre"; r.Level = "R+" + i % 4; r.AreaM2 = 12 + i * 0.013; return r; })
+            .Append(new RoomInput { Key = "r99", Name = "Chambre", Level = "R+1", AreaM2 = 45 }).ToArray();
+        var result = await Advisor(llm).AdviseRoomsAsync(rooms, null, new());
+        Assert.Equal(1, llm.Calls);
+        Assert.Equal(new[] { 2 }, contexts);
+        Assert.Equal(41, result.Count);
+        Assert.All(result, a => Assert.Equal("Carrelage grès cérame", a.Finishes["Sol"].Designation));
+    }
+
+    [Fact]
+    public async Task Web_sources_survive_repair_and_url_variants()
+    {
+        var llm = new FakeLlm((r, _) => Task.FromResult(r.Messages.Count == 2
+            ? new LlmResponse { Content = "pas du JSON", Citations = { "https://www.exemple.ci/local-technique/" } }
+            : Answer("{\"pieces\":[{\"id\":\"r1\",\"sources\":[\"http://exemple.ci/local-technique\",\"https://inventee.example\"]}]}")));
+        var result = await Advisor(llm, new AiOptions { WebSearch = true }).AdviseRoomsAsync(new[] { Room() }, null, new());
+        Assert.Equal(new[] { "http://exemple.ci/local-technique" }, result.Single().Sources);
+    }
+
+    [Theory]
+    [InlineData(1.5, 0)]
+    [InlineData(12, 2)]
+    [InlineData(24.9, 2)]
+    [InlineData(25, 3)]
+    [InlineData(400, 5)]
+    public void Size_classes(double area, int expected) => Assert.Equal(expected, AutopilotAdvisor.SizeClass(area));
 
     [Theory]
     [InlineData(401)]

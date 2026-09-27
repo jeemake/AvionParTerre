@@ -93,6 +93,12 @@ internal sealed class Autopilot
         _joinery.Clear();
         _joineryInputs.Clear();
         _roomData.Clear();
+        _carnets.Clear();
+        _planLevels.Clear();
+        _coupes = _facades = false;
+        // Le profil documentaire et l'origine de la bibliothèque sont redécidés (et rejournalisés) à chaque analyse
+        _dce = null;
+        _librarySource = DecisionSource.NonDecide;
         Log.Decisions.Clear();
         foreach (var line in Norms.Describe(_doc)) Log.Add("Normes du projet", "Maquette", line, DecisionSource.Projet);
 
