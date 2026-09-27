@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>AvionParTerre.Revit</RootNamespace>
+    <AssemblyName>AvionParTerre</AssemblyName>
+    <Version>0.2.0</Version>
+    <PlatformTarget>x64</PlatformTarget>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <RevitVersion>2025</RevitVersion>
+    <NoWarn>$(NoWarn);MSB3277</NoWarn>
+    <RevitDir>C:\Program Files\Autodesk\Revit $(RevitVersion)</RevitDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="RevitAPI">
+      <HintPath>$(RevitDir)\RevitAPI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="RevitAPIUI">
+      <HintPath>$(RevitDir)\RevitAPIUI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AvionParTerre.Core\AvionParTerre.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\LogoKDA.jpg" LogicalName="AvionParTerre.Revit.Resources.LogoKDA.jpg" />
+    <EmbeddedResource Include="Resources\avion_32.png" LogicalName="AvionParTerre.Revit.Resources.avion_32.png" />
+    <EmbeddedResource Include="Resources\avion_16.png" LogicalName="AvionParTerre.Revit.Resources.avion_16.png" />
+    <EmbeddedResource Include="Resources\avion_sprite.png" LogicalName="AvionParTerre.Revit.Resources.avion_sprite.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\data\*.json" Link="data\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

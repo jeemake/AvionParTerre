@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>Avion par terre</Name>
+    <Assembly>AvionParTerre\AvionParTerre.dll</Assembly>
+    <AddInId>8F3D2C71-5B4A-4E2B-9C1D-7A6E5F4B3C21</AddInId>
+    <FullClassName>AvionParTerre.Revit.App</FullClassName>
+    <VendorId>KOFFIDIABATE</VendorId>
+    <VendorDescription>Koffi &amp; Diabaté Architectes — Cellule IA</VendorDescription>
+  </AddIn>
+</RevitAddIns>

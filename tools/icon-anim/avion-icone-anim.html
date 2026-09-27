@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Avion par terre · icône animée</title>
+<style>
+:root{--bg:#FFFFFF;--panel:#F2F2F2;--line:#DDE2E5;--text:#0B0C12;--muted:#66747C;--accent:#7AB648}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 "Century Gothic",CenturyGothic,"Questrial",Futura,sans-serif}
+main{max-width:1000px;margin:0 auto;padding:28px 16px 56px}
+h1{font-size:20px;margin:0;font-weight:700;color:var(--muted)}
+.sub{margin:4px 0 22px;color:var(--accent)}
+h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:26px 0 10px;font-weight:700}
+.stage{display:grid;grid-template-columns:320px 1fr;gap:28px}
+@media(max-width:760px){.stage{grid-template-columns:1fr}}
+canvas{image-rendering:pixelated;image-rendering:crisp-edges;display:block}
+.big{width:320px;height:320px;max-width:100%;border-radius:4px;outline:1px solid var(--line)}
+.bg-damier{background:repeating-conic-gradient(#F2F2F2 0 25%,#E4E8EA 0 50%) 0 0/20px 20px}
+.bg-clair{background:#F3F3F3}
+.bg-sombre{background:#2F3542}
+.controls{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;align-items:center}
+button,select{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:4px;padding:6px 10px;font:inherit;cursor:pointer}
+button:hover,select:hover{border-color:var(--muted)}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:700;min-width:74px}
+input[type=range]{width:100%;margin:12px 0 0;accent-color:var(--accent)}
+.meta{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.timeline{position:relative;display:flex;height:26px;margin-top:8px;border-radius:3px;overflow:hidden;border:1px solid var(--line);font-size:10px}
+.timeline div{display:flex;align-items:center;justify-content:center;border-right:1px solid var(--line);color:var(--muted);white-space:nowrap;overflow:hidden;background:var(--panel)}
+.timeline div:last-of-type{border-right:0}
+.timeline div.on{background:var(--accent);color:#fff}
+.timeline i{position:absolute;top:0;bottom:0;width:2px;background:var(--text);pointer-events:none}
+.sizes{display:flex;gap:18px;align-items:flex-end;flex-wrap:wrap}
+.sizes figure{margin:0;text-align:center}
+.sizes canvas{background:repeating-conic-gradient(#F2F2F2 0 25%,#E4E8EA 0 50%) 0 0/8px 8px}
+.sizes figcaption{font-size:11px;color:var(--muted);margin-top:4px}
+.ribbons{display:flex;gap:14px;flex-wrap:wrap}
+.ribbon{padding:6px 8px 3px;border-radius:3px;font:11px/1.2 "Segoe UI",sans-serif}
+.ribbon.light{background:#F3F3F3;color:#222;border:1px solid #D0D0D0}
+.ribbon.dark{background:#2F3542;color:#E4E4E4;border:1px solid #434B5B}
+.ribbon .row{display:flex;gap:2px}
+.rbtn{display:flex;flex-direction:column;align-items:center;width:62px;text-align:center;padding:3px 2px;border-radius:2px}
+.ribbon.light .rbtn.hot{background:#D5E8F7}
+.ribbon.dark .rbtn.hot{background:#44506A}
+.rbtn canvas,.rbtn .ph{width:32px;height:32px;margin-bottom:3px}
+.rbtn .ph{border-radius:3px;opacity:.3;background:currentColor}
+.ribbon .title{text-align:center;margin-top:5px;padding-top:2px;border-top:1px solid currentColor;opacity:.55}
+.pr{display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:8px;padding:0;margin:0}
+.pr li{list-style:none;background:var(--panel);border:1px solid transparent;border-radius:4px;padding:8px 10px;transition:border-color .12s,background .12s}
+.pr li.on{border-color:var(--accent);background:#EEF6E6}
+.pr b{display:block;font-size:12.5px;color:var(--muted)}
+.pr li.on b{color:var(--accent)}
+.pr span{color:var(--muted);font-size:12px}
+.note{color:var(--muted);font-size:12.5px;max-width:70ch}
+kbd{font:11px/1 ui-monospace,Consolas,monospace;border:1px solid var(--line);border-bottom-width:2px;border-radius:3px;padding:1px 4px}
+</style>
+</head>
+<body>
+<main>
+  <h1>Avion par terre · icône animée</h1>
+  <p class="sub">Silhouette 32 × 32 sur fond transparent — décollage, croisière, atterrissage — selon les 12 principes de l’animation.</p>
+
+  <div class="stage">
+    <div>
+      <canvas id="big" class="big bg-damier" width="32" height="32"></canvas>
+      <input id="scrub" type="range" min="0" max="59" value="0" aria-label="Image">
+      <div class="timeline" id="timeline"></div>
+      <div class="controls">
+        <button id="play" class="primary">Pause</button>
+        <button id="prev" title="Image précédente (←)">◀</button>
+        <button id="next" title="Image suivante (→)">▶</button>
+        <select id="fps" title="Cadence">
+          <option value="12" selected>12 i/s (en deux)</option>
+          <option value="24">24 i/s (en un)</option>
+        </select>
+      </div>
+      <div class="controls">
+        <select id="tone" title="Ton">
+          <option value="vert" selected>Vert KDA</option>
+          <option value="gris">Gris KDA</option>
+          <option value="noir">Noir KDA</option>
+          <option value="blanc">Blanc (fond sombre)</option>
+        </select>
+        <select id="bg" title="Aperçu du fond">
+          <option value="damier" selected>Aperçu : damier</option>
+          <option value="clair">Aperçu : clair</option>
+          <option value="sombre">Aperçu : sombre</option>
+        </select>
+      </div>
+      <p class="meta" id="meta"></p>
+    </div>
+
+    <div>
+      <h2 style="margin-top:0">Tailles réelles</h2>
+      <div class="sizes">
+        <figure><canvas id="s1" width="32" height="32" style="width:32px;height:32px"></canvas><figcaption>1×</figcaption></figure>
+        <figure><canvas id="s2" width="32" height="32" style="width:64px;height:64px"></canvas><figcaption>2×</figcaption></figure>
+        <figure><canvas id="s4" width="32" height="32" style="width:128px;height:128px"></canvas><figcaption>4×</figcaption></figure>
+      </div>
+
+      <h2>Dans le ruban Revit</h2>
+      <div class="ribbons">
+        <div class="ribbon light">
+          <div class="row">
+            <div class="rbtn hot"><canvas id="r1" width="32" height="32"></canvas>Avion<br>par terre</div>
+            <div class="rbtn"><div class="ph"></div>Registre</div>
+          </div>
+          <div class="title">K&amp;D · DCE</div>
+        </div>
+        <div class="ribbon dark">
+          <div class="row">
+            <div class="rbtn hot"><canvas id="r2" width="32" height="32"></canvas>Avion<br>par terre</div>
+            <div class="rbtn"><div class="ph"></div>Registre</div>
+          </div>
+          <div class="title">K&amp;D · DCE</div>
+        </div>
+      </div>
+
+      <h2>Export</h2>
+      <div class="controls" style="margin-top:0">
+        <select id="scale" title="Échelle d’export">
+          <option value="1">32 px</option>
+          <option value="2">64 px</option>
+          <option value="4">128 px</option>
+        </select>
+        <button id="sheet">Planche PNG (toutes les images)</button>
+        <button id="still">Image courante PNG</button>
+      </div>
+      <p class="note">PNG à fond transparent, dans le ton choisi. Revit n’anime pas les boutons du ruban : prenez l’image 0 comme icône fixe, et la planche pour une fenêtre WPF (écran d’attente, « À propos », progression de l’export). <kbd>Espace</kbd> lecture/pause, <kbd>←</kbd> <kbd>→</kbd> image par image.</p>
+    </div>
+  </div>
+
+  <h2>Les 12 principes, en direct</h2>
+  <ul class="pr" id="principles"></ul>
+</main>
+
+<script>
+"use strict";
+// ─────────────────────────────────────────────────────────────── réglages
+const N = 32;          // taille de l'icône en pixels
+const T = 5.0;         // durée de la boucle (s) → 60 images à 12 i/s
+const RUNWAY = 120;    // distance parcourue par la piste sur une boucle (px), multiple du motif
+
+// Un seul ton de la charte K&D, décliné en trois valeurs : plein (X), ombre (S), clair (l).
+const TONES = {
+  vert:  { X: '#7AB648', S: '#4E7F27', l: '#C4E0A8' },
+  gris:  { X: '#66747C', S: '#3F4A50', l: '#B4BDC2' },
+  noir:  { X: '#0B0C12', S: '#3A3D45', l: '#A9AEB5' },
+  blanc: { X: '#FFFFFF', S: '#B4BDC2', l: '#66747C' },
+};
+const rgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+
+// Silhouette de profil, nez à droite, en formes vectorielles simples (unité = 1 px, origine =
+// bas de la roue principale : l'avion pivote sur ses roues). Chaque image est rastérisée puis
+// seuillée à 50 % de couverture : bords nets, sans bruit de rotation.
+const circle = (x, y, r, n = 14) => Array.from({ length: n }, (_, i) => [x + r * Math.cos(i / n * 2 * Math.PI), y + r * Math.sin(i / n * 2 * Math.PI)]);
+const FUSELAGE = [[-10,-8],[7,-8],[8.6,-7.8],[9.9,-7.2],[10.8,-6.3],[11.1,-5.5],[10.7,-4.7],[9.6,-4.1],[8,-4],
+                  [-5,-4],[-12,-6.6],[-12.8,-7.3],[-12.4,-8]];
+const FIN  = [[-11.8,-7.9],[-7.6,-7.9],[-11.2,-13.2],[-13.4,-13.2]];
+const STAB = [[-9.5,-6.9],[-11,-6.9],[-14.4,-5.9],[-13.6,-5.3]];
+const WING = [[3.8,-5.4],[.4,-5.4],[-5.6,-2],[-2.4,-2]];
+const SC = 0.88;             // échelle globale de la silhouette
+const GROUND = 28;           // rangée de la piste
+
+// Calques du haut vers le bas : aile (ombre), fuselage (plein), train (ombre, caché dans le fuselage).
+function planeLayers(g) {
+  const gear = [];
+  if (g > .05) {
+    const drop = 3.2 * (1 - g);
+    const leg = (x, w) => [[x - w, -4.4], [x + w, -4.4], [x + w, -1.6 - drop], [x - w, -1.6 - drop]];
+    gear.push(leg(0, .65), circle(0, -1.25 - drop, 1.25), leg(7, .6), circle(7, -1.1 - drop, 1.1));
+  }
+  return [['S', [WING]], ['X', [FUSELAGE, FIN, STAB]], ['S', gear]];
+}
+function inPoly(P, x, y) {
+  let inside = false;
+  for (let i = 0, j = P.length - 1; i < P.length; j = i++) {
+    const [xi, yi] = P[i], [xj, yj] = P[j];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+// ─────────────────────────────────────────────────────────────── timing
+const clamp01 = x => x < 0 ? 0 : x > 1 ? 1 : x;
+const seg = (t, a, b) => clamp01((t - a) / (b - a));
+const mod = (a, n) => ((a % n) + n) % n;
+const E = {
+  lin: x => x,
+  inQ: x => x * x,
+  outQ: x => 1 - (1 - x) * (1 - x),
+  io: x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2,
+};
+// Pose à pose : [temps, valeur, courbe d'arrivée]
+function track(keys, t) {
+  if (t <= keys[0][0]) return keys[0][1];
+  for (let i = 1; i < keys.length; i++) {
+    const [t1, v1, e = E.io] = keys[i];
+    if (t <= t1) { const [t0, v0] = keys[i - 1]; return v0 + (v1 - v0) * e((t - t0) / (t1 - t0)); }
+  }
+  return keys[keys.length - 1][1];
+}
+
+const X_KEYS = [[0,15],[.45,15],[.82,13.5],[.85,13.5],[.97,15.5,E.outQ],[1.9,17],[2.7,18,E.outQ],
+                [3.25,17],[3.98,16.5],[4.55,14,E.outQ],[4.8,15],[5,15]];
+const Y_KEYS = [[0,GROUND],[1.95,GROUND],[2.75,15],[3.25,15],[3.9,GROUND-1],[3.98,GROUND,E.inQ],[5,GROUND]];
+const P_KEYS = [[0,0],[.45,0],[.82,3],[.85,3],[.97,-1.5,E.outQ],[1.15,0],[1.72,0],[2.0,12,E.outQ],
+                [2.3,12],[2.75,0],[3.25,0],[3.45,-7],[3.75,-7],[3.95,5,E.outQ],[3.98,5],
+                [4.08,-3,E.inQ],[4.22,-.5,E.outQ],[4.45,-2.5],[4.62,1.5,E.outQ],[4.8,0],[5,0]];
+const G_KEYS = [[0,1],[2.1,1],[2.4,0],[3.35,0],[3.6,1,E.outQ],[5,1]];
+
+function speed(t) {
+  if (t < .85) return 0;
+  if (t < 1.85) return E.inQ(seg(t, .85, 1.85));
+  if (t < 3.98) return 1;
+  if (t < 4.6) { const u = seg(t, 3.98, 4.6); return (1 - u) * (1 - u); }
+  return 0;
+}
+// Distance parcourue, normalisée pour que le motif de piste retombe pile en fin de boucle.
+const DIST = (() => {
+  const a = new Float64Array(5001); let acc = 0;
+  for (let i = 1; i <= 5000; i++) { acc += speed((i - .5) / 1000) / 1000; a[i] = acc; }
+  for (let i = 0; i <= 5000; i++) a[i] *= RUNWAY / acc;
+  return a;
+})();
+const distAt = t => DIST[Math.max(0, Math.min(5000, Math.round(t * 1000)))];
+
+function state(t) {
+  const x = track(X_KEYS, t);
+  let y = track(Y_KEYS, t);
+  y -= 1.2 * Math.sin(Math.PI * seg(t, 2.75, 3.25));   // léger roulis de croisière
+  y -= 1.3 * Math.sin(Math.PI * seg(t, 4.02, 4.16));   // rebond au toucher
+  const pitch = track(P_KEYS, t);
+  const gear = track(G_KEYS, t);
+
+  // Compression / étirement, à volume constant (sx · sy = 1)
+  const coil = t >= .45 && t < .85 ? E.io(seg(t, .45, .82)) : 0;
+  let k = -.09 * coil;
+  if (t >= .85) { const d = t - .85; k += .14 * Math.exp(-d * 5) * Math.cos(d * 10); }
+  if (t >= 3.98) { const d = t - 3.98; k += .11 * Math.exp(-d * 7) * Math.cos(d * 18); }
+  k += .04 * Math.sin(Math.PI * seg(t, 1.95, 2.75)) + .03 * Math.sin(Math.PI * seg(t, 3.25, 3.98));
+  return { x, y, pitch, gear, sx: 1 + k, sy: 1 / (1 + k) };
+}
+
+// Position écran d'un point du sprite
+function toScreen(st, u, v) {
+  const th = -st.pitch * Math.PI / 180, c = Math.cos(th), s = Math.sin(th);
+  const lx = u * SC * st.sx, ly = v * SC * st.sy;
+  return [Math.round(st.x) + lx * c - ly * s, Math.round(st.y) + lx * s + ly * c];
+}
+
+// Particules : calculées image par image (animation directe) à partir d'un instant d'émission.
+const PUFFS = [
+  { t0: .50, at: 'eng',  vx: -26, rise: 1, life: .40 },
+  { t0: .62, at: 'eng',  vx: -30, rise: 2, life: .40 },
+  { t0: .74, at: 'eng',  vx: -34, rise: 1, life: .40 },
+  { t0: 3.98, at: 'main', vx: -8,  rise: 3, life: .50, dx: -1 },
+  { t0: 3.98, at: 'main', vx: 4,   rise: 2, life: .45, dx: 1 },
+  { t0: 4.02, at: 'main', vx: -14, rise: 4, life: .55, dx: -2 },
+  { t0: 4.08, at: 'nose', vx: -6,  rise: 2, life: .40 },
+  { t0: 4.10, at: 'nose', vx: 6,   rise: 1, life: .35 },
+].map(p => {
+  const st = state(p.t0);
+  const [ax, ay] = p.at === 'main' ? [Math.round(st.x), Math.round(st.y) - 1]
+                 : p.at === 'nose' ? toScreen(st, 7, -.5)
+                 : toScreen(st, -4, -3);
+  return { ...p, ax, ay, s0: distAt(p.t0) };
+});
+
+// ─────────────────────────────────────────────────────────────── rendu
+function render(t, tone, out) {
+  const buf = new Array(N * N).fill(null);
+  const inb = (x, y) => x >= 0 && x < N && y >= 0 && y < N;
+  const put = (x, y, k) => { if (inb(x, y)) buf[y * N + x] = k; };
+  const s = distAt(t), fs = Math.floor(s);
+  const st = state(t), cx = Math.round(st.x), cy = Math.round(st.y);
+
+  // piste : un simple trait tireté qui défile
+  for (let x = 0; x < N; x++) if (mod(x + fs, 12) < 8) put(x, GROUND, 'l');
+
+  // ombre sur la piste : rétrécit avec l'altitude
+  const alt = GROUND - cy, sw = Math.round(15 - alt * 1.1);
+  if (sw >= 3) { const x0 = cx - 1 - Math.floor(sw / 2); for (let x = x0; x < x0 + sw; x++) put(x, GROUND, 'l'); }
+
+  // lignes de vitesse, dans l'axe de l'avion
+  const v = speed(t);
+  if (v > .6) {
+    const n = v > .85 ? 2 : 1, tan = Math.tan(st.pitch * Math.PI / 180);
+    const rows = [-8, -4], lens = [4, 3];
+    for (let i = 0; i < n; i++) {
+      const xs = cx - 14 - Math.floor(mod(t * 55 + i * 9, 18));
+      for (let j = 0; j < lens[i]; j++) {
+        const x = xs - j;
+        put(x, Math.round(cy + rows[i] + (cx - x) * tan), 'l');
+      }
+    }
+  }
+
+  // avion : 4 × 4 échantillons par pixel, pixel allumé si la moitié est couverte
+  const layers = planeLayers(st.gear);
+  const th = -st.pitch * Math.PI / 180, c = Math.cos(th), sn = Math.sin(th);
+  const kx = 1 / (SC * st.sx), ky = 1 / (SC * st.sy);
+  for (let y = Math.max(0, cy - 16); y < Math.min(N, cy + 3); y++)
+    for (let x = Math.max(0, cx - 17); x < Math.min(N, cx + 15); x++) {
+      const hits = {}; let n = 0;
+      for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) {
+        const dx = x + (i + .5) / 4 - cx, dy = y + (j + .5) / 4 - cy;
+        const u = (dx * c + dy * sn) * kx, w = (-dx * sn + dy * c) * ky;
+        if (u < -15 || u > 12 || w < -14 || w > .5) continue;
+        for (const [key, polys] of layers)
+          if (polys.some(P => inPoly(P, u, w))) { hits[key] = (hits[key] || 0) + 1; n++; break; }
+      }
+      if (n >= 8) buf[y * N + x] = (hits.S || 0) > (hits.X || 0) ? 'S' : 'X';
+    }
+
+  // poussière et souffle
+  for (const p of PUFFS) {
+    const a = t - p.t0; if (a < 0 || a >= p.life) continue;
+    const q = a / p.life;
+    const px = Math.round(p.ax + (p.dx || 0) + p.vx * a - .6 * (s - p.s0));
+    const py = Math.round(p.ay - p.rise * E.outQ(q));
+    put(px, py, 'l');
+    if (q >= .25 && q < .7) { put(px - 1, py, 'l'); put(px + 1, py, 'l'); put(px, py - 1, 'l'); put(px, py + 1, 'l'); }
+  }
+
+  const pal = { X: rgb(TONES[tone].X), S: rgb(TONES[tone].S), l: rgb(TONES[tone].l) };
+  const d = out.data;
+  for (let i = 0; i < N * N; i++) {
+    const k = buf[i], o = i * 4;
+    if (k) { const p = pal[k]; d[o] = p[0]; d[o + 1] = p[1]; d[o + 2] = p[2]; d[o + 3] = 255; }
+    else { d[o] = d[o + 1] = d[o + 2] = d[o + 3] = 0; }
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────── principes
+const PRINCIPLES = [
+  ['Compression / étirement', 'recul compressé, élan étiré, écrasement au toucher — volume constant'],
+  ['Anticipation', 'l’avion recule et se tasse, freins serrés, avant la mise des gaz'],
+  ['Mise en scène', 'silhouette pleine, un seul ton, fond transparent, rien d’autre à lire'],
+  ['Directe / pose à pose', 'poses clés interpolées ; poussière et souffle calculés image par image'],
+  ['Continuité / chevauchement', 'le train rentre après l’envol, le nez retombe après les roues, bascule à l’arrêt'],
+  ['Ralentis (slow in / out)', 'chaque courbe accélère puis décélère, y compris le défilement de la piste'],
+  ['Arcs', 'montée et descente en courbe, l’avion pivote sur sa roue principale'],
+  ['Action secondaire', 'lignes de vitesse, souffle des réacteurs, poussière au toucher'],
+  ['Timing', '12 i/s « en deux », poses tenues au sol, boucle de 60 images'],
+  ['Exagération', 'cabrage appuyé, petit rebond au toucher, étirement marqué au départ'],
+  ['Dessin solide', 'aile et train en ton foncé pour la profondeur, ombre qui rétrécit avec l’altitude'],
+  ['Attrait', 'avion trapu, dérive et nez francs, lisible à 32 px'],
+];
+const PHASES = [
+  [0, .45, 'Au sol', [2, 8, 11]],
+  [.45, .85, 'Anticipation', [1, 0, 9]],
+  [.85, 1.72, 'Roulage', [0, 5, 7, 10]],
+  [1.72, 2.05, 'Rotation', [6, 9, 4]],
+  [2.05, 2.75, 'Montée', [6, 4, 5]],
+  [2.75, 3.25, 'Croisière', [7, 2, 11]],
+  [3.25, 3.98, 'Approche', [6, 4, 5]],
+  [3.98, 4.6, 'Toucher', [0, 4, 9, 3]],
+  [4.6, 5, 'Arrêt', [5, 8, 4]],
+];
+
+// ─────────────────────────────────────────────────────────────── interface
+const $ = id => document.getElementById(id);
+const off = document.createElement('canvas'); off.width = off.height = N;
+const octx = off.getContext('2d');
+const img = octx.createImageData(N, N);
+const views = ['big', 's1', 's2', 's4', 'r1', 'r2'].map(id => $(id).getContext('2d'));
+
+const tl = $('timeline'), pr = $('principles');
+PHASES.forEach(([a, b, name]) => {
+  const d = document.createElement('div');
+  d.style.flex = `${b - a} 0 0`; d.textContent = name; d.title = `${name} · ${a.toFixed(2)}–${b.toFixed(2)} s`;
+  tl.appendChild(d);
+});
+const head = document.createElement('i'); tl.appendChild(head);
+PRINCIPLES.forEach(([n, why], i) => {
+  const li = document.createElement('li');
+  li.innerHTML = `<b>${i + 1}. ${n}</b><span>${why}</span>`;
+  pr.appendChild(li);
+});
+
+let fps = 12, frames = T * fps, frame = 0, drawn = -1, playing = true, tone = 'vert';
+const scrub = $('scrub'), playBtn = $('play');
+
+function draw() {
+  const t = frame / fps;
+  render(t, tone, img);
+  octx.putImageData(img, 0, 0);
+  for (const ctx of views) { ctx.clearRect(0, 0, N, N); ctx.drawImage(off, 0, 0); }
+  scrub.max = frames - 1; scrub.value = frame;
+  head.style.left = `calc(${(t / T) * 100}% - 1px)`;
+  const pi = PHASES.findIndex(([a, b]) => t >= a && t < b);
+  [...tl.querySelectorAll('div')].forEach((el, i) => el.classList.toggle('on', i === pi));
+  const on = new Set(pi >= 0 ? PHASES[pi][3] : []);
+  [...pr.children].forEach((li, i) => li.classList.toggle('on', on.has(i)));
+  $('meta').textContent = `image ${frame + 1} / ${frames} · ${t.toFixed(2)} s · ${pi >= 0 ? PHASES[pi][2] : ''}`;
+  drawn = frame;
+}
+
+let last = performance.now(), acc = 0;
+function tick(now) {
+  const dt = Math.min(.25, (now - last) / 1000); last = now;
+  if (playing) { acc += dt; const step = 1 / fps; while (acc >= step) { acc -= step; frame = (frame + 1) % frames; } }
+  if (frame !== drawn) draw();
+  requestAnimationFrame(tick);
+}
+
+function setPlaying(p) { playing = p; acc = 0; playBtn.textContent = p ? 'Pause' : 'Lecture'; }
+function step(n) { setPlaying(false); frame = mod(frame + n, frames); }
+playBtn.onclick = () => setPlaying(!playing);
+$('prev').onclick = () => step(-1);
+$('next').onclick = () => step(1);
+scrub.oninput = () => { setPlaying(false); frame = +scrub.value; };
+$('fps').onchange = e => { const t = frame / fps; fps = +e.target.value; frames = T * fps; frame = Math.round(t * fps) % frames; drawn = -1; };
+$('tone').onchange = e => {
+  tone = e.target.value; drawn = -1;
+  if (tone === 'blanc' && $('bg').value !== 'sombre') { $('bg').value = 'sombre'; $('bg').onchange(); }
+};
+$('bg').onchange = () => { $('big').className = `big bg-${$('bg').value}`; };
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'SELECT') return;
+  if (e.code === 'Space') { e.preventDefault(); setPlaying(!playing); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); step(1); }
+});
+
+function download(canvas, name) {
+  canvas.toBlob(b => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(b); a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }, 'image/png');
+}
+function framesCanvas(list, sc) {
+  const cv = document.createElement('canvas');
+  cv.width = list.length * N * sc; cv.height = N * sc;
+  const ctx = cv.getContext('2d'); ctx.imageSmoothingEnabled = false;
+  const tmp = document.createElement('canvas'); tmp.width = tmp.height = N;
+  const tctx = tmp.getContext('2d'), timg = tctx.createImageData(N, N);
+  list.forEach((f, i) => { render(f / fps, tone, timg); tctx.putImageData(timg, 0, 0); ctx.drawImage(tmp, i * N * sc, 0, N * sc, N * sc); });
+  return cv;
+}
+$('sheet').onclick = () => {
+  const sc = +$('scale').value;
+  download(framesCanvas([...Array(frames).keys()], sc), `avion-par-terre_${tone}_${N * sc}px_${fps}fps_${frames}img.png`);
+};
+$('still').onclick = () => {
+  const sc = +$('scale').value;
+  download(framesCanvas([frame], sc), `avion-par-terre_${tone}_${N * sc}px_img${String(frame).padStart(2, '0')}.png`);
+};
+
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>

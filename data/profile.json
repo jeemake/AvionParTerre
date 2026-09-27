@@ -1,0 +1,284 @@
+{
+  "schema": "avion-par-terre/profile",
+  "schema_version": 1,
+  "version": "0.2.0",
+  "remarque": "Noms des ressources Revit K&D relevés dans les gabarits agence (maquettes PEM V2 et LESE TEST, Revit 2025). Chaque entrée accepte plusieurs noms, comparés sans accents ni casse ; une famille rechargée (« Cartouche A3 Horizontale1 ») est reconnue ; à défaut, une ressource équivalente disponible est utilisée et signalée. Paramètres > Ressources permet d'imposer un choix par projet.",
+  "ressources": {
+    "cartouche_A0": [
+      "Cartouche APD-DCE (A0-A1):A0"
+    ],
+    "cartouche_A1": [
+      "Cartouche APD-DCE (A0-A1):A1"
+    ],
+    "cartouche_A3": [
+      "Cartouche A3 Horizontale:A3-Paysage",
+      "Cartouche APD-DCE (A3):A0",
+      "Cartouche APD-DCE (A2-A2):A3"
+    ],
+    "cartouche_fiche": [
+      "Cartouche A3 Horizontale:A3-Paysage",
+      "Cartouche FICHE TECHNIQUE:FICHE TECHNIQUE",
+      "Cartouche APD-DCE (A3):A0",
+      "Cartouche APD-DCE (A2-A2):A3"
+    ],
+    "type_vue_plan": [
+      "Plan d'étage DCE",
+      "Plan d'étage"
+    ],
+    "type_vue_coupe": [
+      "Coupe du bâtiment",
+      "Coupe du bâtiment 50è"
+    ],
+    "type_vue_3d": [
+      "Vue 3D"
+    ],
+    "gabarit_plan_1_50": [
+      "APD-DCE_50e"
+    ],
+    "gabarit_plan_1_100": [
+      "APD-DCE_100e"
+    ],
+    "gabarit_plan_1_200": [
+      "APD-DCE_200e"
+    ],
+    "gabarit_plan_piece": [
+      "APD-DCE_20e_ Detail de pieces"
+    ],
+    "gabarit_elevation_piece": [
+      "Détail de pieces_Coupes"
+    ],
+    "gabarit_3d": [
+      "VUE 3D"
+    ],
+    "gabarit_calepin_plan": [
+      "Calepin  Baies_Vue en plan",
+      "Calepin Baies_Vue en plan"
+    ],
+    "gabarit_calepin_coupe": [
+      "Calepin Baies_ Coupes"
+    ],
+    "etiquette_piece_1_50": [
+      "Etiquette de pièce 50è:Etiquette de pièces DCE"
+    ],
+    "etiquette_piece_1_100": [
+      "Etiquette de pièce 100è:Etiquette de pièces DCE"
+    ],
+    "etiquette_piece_detail": [
+      "Etiquette de détail de pièce 20è:DCE",
+      "Etiquette de pièce 50è:Etiquette de pièces DCE"
+    ],
+    "etiquette_porte_1_50": [
+      "Etiquette de porte 50è:Nombre"
+    ],
+    "etiquette_porte_1_100": [
+      "Etiquette de porte 100è:Nombre",
+      "Etiquette de porte 100e:Nombre"
+    ],
+    "etiquette_fenetre_1_50": [
+      "Etiquette de Fenetre 50è:Etiquette de Fenetre 50è"
+    ],
+    "etiquette_fenetre_1_100": [
+      "Etiquette de Fenetre 100è:Etiquette de Fenetre 100è"
+    ],
+    "titre_vue": [
+      "Avion par terre - Titre de vue"
+    ],
+    "texte_fiche": [
+      "Note textuelle CG 2.25",
+      "Note textuelle 2.5 mm"
+    ],
+    "texte_fiche_titre": [
+      "texte coupe Ech 20",
+      "Note textuelle 5 mm"
+    ],
+    "titre_vue_modele": [
+      "Vue sur la feuille"
+    ],
+    "titre_vue_famille": [
+      "TITRE DE VUE:Titre de vue",
+      "FR_Titre de vue simple:FR_Titre de vue simple"
+    ]
+  },
+  "parametres": {
+    "piece_niv": [
+      "Niv"
+    ],
+    "piece_hsp": [
+      "H.S.P"
+    ],
+    "piece_hsd": [
+      "H.S.D"
+    ],
+    "feuille_phase": [
+      "Phase projet"
+    ],
+    "feuille_lot": [
+      "Lot"
+    ]
+  },
+  "profils_dce": [
+    {
+      "code": "KD_AT_IMMEUBLE",
+      "libelle": "AT Immeuble — grandes feuilles A1, 1:100, carnets A3",
+      "format_plans": "A1",
+      "echelle_plans": 100,
+      "format_carnets": "A3",
+      "echelles_carnets": [
+        20,
+        25,
+        30,
+        35,
+        50
+      ]
+    },
+    {
+      "code": "KD_AT_MAISON",
+      "libelle": "AT Maison — grandes feuilles A0, 1:50, carnets A3",
+      "format_plans": "A0",
+      "echelle_plans": 50,
+      "format_carnets": "A3",
+      "echelles_carnets": [
+        20,
+        25,
+        30,
+        35,
+        50
+      ]
+    },
+    {
+      "code": "KD_AT_ADAPTE",
+      "libelle": "AT adapté — A1, 1:200, carnets A3",
+      "format_plans": "A1",
+      "echelle_plans": 200,
+      "format_carnets": "A3",
+      "echelles_carnets": [
+        20,
+        25,
+        30,
+        35,
+        50,
+        60,
+        80
+      ]
+    }
+  ],
+  "numerotation": {
+    "prefixe_batiment": "",
+    "plans": "1.{index:00}",
+    "plans_pas": 10,
+    "carnet_groupe": "D{groupe}",
+    "carnet_page": "D{groupe}.{page:00}",
+    "carnet_elevation": "E{groupe}-{lettre}",
+    "fiche": "{lot}-{index:00}"
+  },
+  "mise_en_page": {
+    "remarque": "Marges en mm papier mesurées depuis l'emprise du cartouche (familles K&D). Les noms sont comparés sans suffixe de rechargement.",
+    "zones_cartouche": {
+      "Cartouche APD-DCE (A0-A1)": {
+        "gauche": 15,
+        "droite": 215,
+        "bas": 15,
+        "haut": 15
+      },
+      "Cartouche APD-DCE (A2-A2)": {
+        "gauche": 15,
+        "droite": 215,
+        "bas": 15,
+        "haut": 15
+      },
+      "Cartouche A3 Horizontale": {
+        "gauche": 10,
+        "droite": 28,
+        "bas": 10,
+        "haut": 10
+      },
+      "Cartouche FICHE TECHNIQUE": {
+        "gauche": 8,
+        "droite": 8,
+        "bas": 8,
+        "haut": 45
+      }
+    },
+    "zone_defaut": {
+      "gauche": 15,
+      "droite": 15,
+      "bas": 15,
+      "haut": 15
+    },
+    "espacement_vues": 10
+  },
+  "carnets": {
+    "decalage_cadrage_mm": 600,
+    "profondeur_elevation_marge_mm": 400,
+    "masquer_reperes_au_dela_de": 50,
+    "familles_proposees": [
+      "sanitaire",
+      "cuisine_service",
+      "habitation",
+      "accueil"
+    ]
+  },
+  "menuiseries": {
+    "lots": [
+      {
+        "code": "CAL",
+        "libelle": "Menuiserie aluminium / vitrerie",
+        "prefixes": [
+          "PAVD",
+          "PAPD",
+          "CAV",
+          "ENSAV",
+          "EnsVJ",
+          "VJ",
+          "CAFa",
+          "CAF",
+          "CAC",
+          "CAP",
+          "PAV",
+          "PAP",
+          "FAP",
+          "PAC",
+          "FAC",
+          "FAB",
+          "EnsAlu",
+          "ENSA",
+          "CLV",
+          "SD"
+        ]
+      },
+      {
+        "code": "CB",
+        "libelle": "Menuiserie bois / agencement",
+        "prefixes": [
+          "PBT",
+          "PBP",
+          "PBD",
+          "PBTV",
+          "PBDO",
+          "ENSPLR",
+          "EnsPLT",
+          "EnsPL",
+          "PLT",
+          "PLR",
+          "PL",
+          "PBB",
+          "PBC",
+          "PBO",
+          "PB",
+          "EnsBV"
+        ]
+      },
+      {
+        "code": "CS",
+        "libelle": "Serrurerie",
+        "prefixes": [
+          "PM",
+          "PORTAIL",
+          "VR",
+          "GR"
+        ]
+      }
+    ],
+    "repetitions_batiment": 1
+  }
+}
