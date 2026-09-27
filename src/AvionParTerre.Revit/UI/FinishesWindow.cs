@@ -102,7 +102,10 @@ internal sealed class FinishRow : SelectableRow
     {
         if (a.FamilyCode != null) { FamilyCode = a.FamilyCode; Famille = (cat.Family(a.FamilyCode)?.Libelle ?? a.FamilyCode) + " (IA)"; }
         var opt = Options.FirstOrDefault(o => o.Profile?.Id == a.ProfileId);
-        if (opt != null) Option = opt;
+        // Choosing metadata must not copy profile values over preserved/manual fields.
+        _option = opt;
+        Raise(nameof(Option));
+        Raise(nameof(Remarque));
         foreach (var (s, f) in a.Finishes) SetValue(s, f.Designation, fromProfile: true);
         Source = DecisionSource.Ia;
         Model = model;

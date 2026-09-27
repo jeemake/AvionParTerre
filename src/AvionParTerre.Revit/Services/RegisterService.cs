@@ -166,14 +166,14 @@ internal sealed class PdfExporter
                     report.Issue(Severity.Bloquant, "export", s.SheetNumber, "Fichier PDF absent après export.", "Relancer l'export.", s.Id.Value);
                     continue;
                 }
-                var bytes = File.ReadAllBytes(path);
+                using var pdf = File.OpenRead(path);
                 manifest.Fichiers.Add(new IssuedFile
                 {
                     Numero = s.SheetNumber,
                     Titre = s.Name,
                     Fichier = Path.GetFileName(path),
-                    Octets = bytes.LongLength,
-                    Sha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
+                    Octets = pdf.Length,
+                    Sha256 = Convert.ToHexString(SHA256.HashData(pdf)).ToLowerInvariant(),
                     Format = RevitUtil.TitleBlockOf(_doc, s)?.Name,
                 });
                 report.Created.Add($"{Path.GetFileName(path)}");

@@ -59,7 +59,8 @@ public static class SheetPacker
             var rect = pos.Value;
             placed.Add(new PlacedItem(it.Key, page, rect));
             pageUsed = true;
-            Occupy(free, new RectMm(rect.X, rect.Y - spacing, rect.Width + spacing, rect.Height + spacing));
+            if (tooBig) free.Clear(); // Oversize items must remain alone, including wide but short views.
+            else Occupy(free, new RectMm(rect.X, rect.Y - spacing, rect.Width + spacing, rect.Height + spacing));
         }
 
         return new PackResult(Center(placed, area), oversize, pageUsed ? page + 1 : 0);

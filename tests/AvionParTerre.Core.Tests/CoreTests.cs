@@ -131,6 +131,15 @@ public class PackerTests
         AssertNoOverlap(r);
     }
 
+    [Fact]
+    public void Oversize_view_keeps_its_own_page()
+    {
+        var r = SheetPacker.Pack(new[] { new PackItem("wide", 500, 40), new PackItem("small", 30, 30) }, new RectMm(0, 0, 380, 270), 10);
+        Assert.Equal(2, r.PageCount);
+        Assert.Equal(0, r.Placed[0].Page);
+        Assert.Equal(1, r.Placed[1].Page);
+    }
+
     private static void AssertNoOverlap(PackResult r)
     {
         foreach (var a in r.Placed)

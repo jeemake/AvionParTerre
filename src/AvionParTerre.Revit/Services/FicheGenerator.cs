@@ -118,7 +118,7 @@ internal sealed class FicheGenerator
         : t.DraftingSheet != null ? $"{t.DraftingSheet} (vue de dessin placée)"
         : null;
 
-    public void Run(IReadOnlyList<JoineryType> types, Report report, WarningCollector warnings)
+    public void Run(IReadOnlyList<JoineryType> types, Report report, WarningCollector warnings, Action<JoineryType, int>? progress = null, Func<bool>? cancelled = null)
     {
         var defaultTb = _res.TitleBlockFor("cartouche_fiche", "A3");
         if (defaultTb == ElementId.InvalidElementId && _norms.Fiches.Count == 0)
@@ -133,8 +133,12 @@ internal sealed class FicheGenerator
             .Select(x => x.Data.Payload.Split('|')).Where(p => p.Length == 2)
             .GroupBy(p => p[0]).ToDictionary(g => g.Key, g => g.Max(p => int.TryParse(p[1], out var i) ? i : 0) + 1);
 
+        int processed = 0;
         foreach (var jt in types)
         {
+            if (cancelled?.Invoke() == true) break;
+            progress?.Invoke(jt, ++processed);
+            if (cancelled?.Invoke() == true) break;
             if (jt.Lot == null)
             {
                 report.Issue(Severity.ARevoir, "lot_menuiserie", jt.Mark, "Repère sans lot reconnu (préfixe inconnu).",

@@ -43,6 +43,12 @@ Commande **Paramètres > Normes du projet** ou **Audit** (lignes « normes_proje
 - nomenclature de localisation : copie du modèle « Tableau quantitatif_… » de l’agence, filtrée sur le type ;
 - données de pièces : Niv « +/-0.00 », « +3.92 » ; HSP / HSD en mètres « 2.80 ».
 
+## Revue de performance et intégration IA
+
+Voir [l'audit détaillé et la feuille de route](docs/efficiency-and-llm-review.md) : corrections de contexte/thread Revit,
+validation locale des réponses, une réparation au maximum, requêtes parallèles bornées et mesure synthétique reproductible.
+Les modifications de l'adaptateur nécessitent une compilation et un test dans Revit 2025 avant livraison.
+
 ## Installation
 
 ```bash

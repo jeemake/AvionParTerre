@@ -35,6 +35,8 @@ internal sealed class UserSettings
     public int ResultatsWeb { get; set; } = 3;
     public double Temperature { get; set; } = 0.2;
     public int TaillePaquet { get; set; } = 20;
+    public int RequetesParalleles { get; set; } = 2;
+    public int DelaiPaquetSecondes { get; set; } = 120;
     public bool ConfirmerAvantEcriture { get; set; } = true;
     public string? Auteur { get; set; }
     public AutopilotSteps Etapes { get; set; } = new();
@@ -84,6 +86,8 @@ internal sealed class UserSettings
         WebMaxResults = ResultatsWeb,
         Temperature = Temperature,
         BatchSize = TaillePaquet,
+        MaxConcurrentRequests = RequetesParalleles,
+        BatchTimeoutSeconds = DelaiPaquetSecondes,
     };
 }
 

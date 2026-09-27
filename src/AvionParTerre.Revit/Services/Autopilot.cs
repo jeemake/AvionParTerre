@@ -39,6 +39,7 @@ internal sealed class Autopilot
     private readonly List<FinishAssignment> _finishes = new();
     private readonly Dictionary<ElementId, string?> _family = new();
     private List<JoineryType> _joinery = new();
+    private List<JoineryInput> _joineryInputs = new();
     private List<RoomDataProposal> _roomData = new();
     public string? Library { get; private set; }
     private DecisionSource _librarySource = DecisionSource.NonDecide;
@@ -57,6 +58,8 @@ internal sealed class Autopilot
         Log = new DecisionLog { Document = doc.Title, Modele = _settings.HasKey ? _settings.Modele : null };
         Norms = ProjectNorms.Detect(doc, data);
         var pi = doc.ProjectInformation;
+        var rooms = RevitUtil.Rooms(doc).ToList();
+        var occupiedLevels = rooms.Select(r => r.LevelId).ToHashSet();
         Context = new ProjectContext
         {
             Document = doc.Title,
@@ -64,8 +67,8 @@ internal sealed class Autopilot
             Client = pi?.get_Parameter(BuiltInParameter.CLIENT_NAME)?.AsString(),
             Address = pi?.get_Parameter(BuiltInParameter.PROJECT_ADDRESS)?.AsString(),
             Number = pi?.get_Parameter(BuiltInParameter.PROJECT_NUMBER)?.AsString(),
-            Levels = RevitUtil.Levels(doc).Where(l => RevitUtil.Rooms(doc).Any(r => r.LevelId == l.Id)).Select(l => l.Name).ToList(),
-            RoomNames = RevitUtil.Rooms(doc).Where(RevitUtil.IsEnclosed).Select(RevitUtil.RoomName).Distinct().ToList(),
+            Levels = RevitUtil.Levels(doc).Where(l => occupiedLevels.Contains(l.Id)).Select(l => l.Name).ToList(),
+            RoomNames = rooms.Where(RevitUtil.IsEnclosed).Select(RevitUtil.RoomName).Distinct().ToList(),
         };
     }
 
@@ -82,6 +85,15 @@ internal sealed class Autopilot
 
     public void Analyze()
     {
+        // Re-analysis after changing the selected steps must not retain old work.
+        Notes.Clear();
+        _toAsk.Clear();
+        _finishes.Clear();
+        _family.Clear();
+        _joinery.Clear();
+        _joineryInputs.Clear();
+        _roomData.Clear();
+        Log.Decisions.Clear();
         foreach (var line in Norms.Describe(_doc)) Log.Add("Normes du projet", "Maquette", line, DecisionSource.Projet);
 
         Library = _data.Choices.Bibliotheque;
@@ -96,6 +108,11 @@ internal sealed class Autopilot
         if (Steps.Fiches)
         {
             _joinery = new FicheGenerator(_doc, _data, Norms).Collect();
+            // Snapshot every Revit property before entering the background LLM phase.
+            _joineryInputs = _joinery.Where(j => !j.Ambiguous && (FicheGenerator.ExistingLabel(j) == null || j.Fiche != null))
+                .Select(FicheGenerator.Input).ToList();
+            foreach (var j in _joinery.Where(j => j.Ambiguous))
+                Notes.Add($"Menuiserie {j.Mark} : repère partagé par plusieurs familles, décision IA ignorée.");
             foreach (var j in _joinery.Where(j => j.Lot != null))
                 Log.Add("Menuiseries", j.Mark, $"lot {j.Lot}", DecisionSource.Referentiel, $"classement par {j.LotSource}", id: j.Symbol.Id.Value);
         }
@@ -118,7 +135,7 @@ internal sealed class Autopilot
             var missing = FinishSummary.RoomSupports.Where(s => !known.ContainsKey(s)).ToList();
             var sugg = matcher.Suggest(name, level, Library, 3);
             var top = sugg.FirstOrDefault();
-            var clear = top != null && cls != null && top.Profile.FamilleLocal == cls.FamilyCode &&
+            var clear = top != null && cls != null && top.Profile.FamilleLocal == cls.FamilyCode && top.Profile.FamilleLocal == _family[r.Id] &&
                         (sugg.Count < 2 || top.Score - sugg[1].Score >= 0.1 || SameSummary(top.Profile, sugg[1].Profile));
             var summary = top == null ? null : FinishSummary.ForRoom(_data.Catalogue, top.Profile.Applications);
             if (clear && missing.All(s => summary![s] != null))
@@ -133,7 +150,7 @@ internal sealed class Autopilot
             }
             _toAsk.Add((r, new RoomInput
             {
-                Key = r.UniqueId, Name = name, Level = level, AreaM2 = Units.ToM2(r.Area), FamilyCode = cls?.FamilyCode,
+                Key = r.UniqueId, Name = name, Level = level, AreaM2 = Units.ToM2(r.Area), FamilyCode = _family[r.Id],
                 CandidateProfiles = sugg.Select(s => s.Profile.Id).ToList(), Known = known,
             }));
         }
@@ -189,7 +206,7 @@ internal sealed class Autopilot
         }
         if (Steps.Fiches)
         {
-            var items = _joinery.Where(j => FicheGenerator.ExistingLabel(j) == null || j.Fiche != null).Select(FicheGenerator.Input).ToList();
+            var items = _joineryInputs;
             if (items.Count > 0)
             {
                 progress.Report($"Menuiseries : lots et prescriptions de {items.Count} type(s)…");
@@ -237,7 +254,7 @@ internal sealed class Autopilot
         }
         foreach (var a in _joineryAdvice)
         {
-            var j = _joinery.FirstOrDefault(x => string.Equals(x.Mark, a.Mark, StringComparison.OrdinalIgnoreCase));
+            var j = _joinery.FirstOrDefault(x => !x.Ambiguous && string.Equals(x.Mark, a.Mark, StringComparison.OrdinalIgnoreCase));
             if (j == null) continue;
             if (j.Lot == null && a.Lot != null)
             {
@@ -266,7 +283,8 @@ internal sealed class Autopilot
         if (Steps.Plans)
         {
             var levels = RevitUtil.Levels(_doc).ToList();
-            _planLevels = levels.Where(l => RevitUtil.Rooms(_doc).Any(r => r.LevelId == l.Id && RevitUtil.IsEnclosed(r))).ToList();
+            var occupied = RevitUtil.Rooms(_doc).Where(RevitUtil.IsEnclosed).Select(r => r.LevelId).ToHashSet();
+            _planLevels = levels.Where(l => occupied.Contains(l.Id)).ToList();
             foreach (var l in _planLevels)
                 Log.Add("Plans généraux", l.Name,
                     Norms.PlanSheetByLevel.TryGetValue(l.Id, out var sh) ? $"couvert par la feuille {sh.SheetNumber} {sh.Name} — conservée" : $"plan « {PlanGenerator.SheetTitle(l)} »",
@@ -303,6 +321,7 @@ internal sealed class Autopilot
                     _roomData.RemoveAll(p => p.Room.Id.Value == id && d.Objet.EndsWith("/ " + p.Label));
                     break;
                 case "Classement des locaux":
+                    _finishes.RemoveAll(f => f.Room.Id.Value == id); // Do not persist a rejected classification through its finish record.
                     foreach (var k in _family.Keys.Where(k => k.Value == id).ToList()) _family[k] = null;
                     _carnets.RemoveAll(r => r.Id.Value == id);
                     break;
@@ -375,6 +394,7 @@ internal sealed class Autopilot
     public void Execute(Report report, WarningCollector w, Action<string> step, Func<bool> cancelled)
     {
         var res = new KdResources(_doc, _data);
+        report.Notes.AddRange(Notes);
         if (Steps.DonneesPieces && _roomData.Count > 0 && !cancelled())
         {
             step($"Données de pièces : {_roomData.Count} valeur(s)…");
@@ -402,23 +422,16 @@ internal sealed class Autopilot
         {
             var rooms = MaxCarnets is { } mc ? _carnets.Take(mc).ToList() : _carnets;
             var dce = PlanProfile(res);
-            for (int i = 0; i < rooms.Count && !cancelled(); i++)
-            {
-                step($"Carnets de pièces : {i + 1}/{rooms.Count} — {RevitUtil.RoomLabel(rooms[i])}");
-                new CarnetGenerator(_doc, _data, dce).Run(new[] { rooms[i] }, report, w);
-            }
+            new CarnetGenerator(_doc, _data, dce).Run(rooms, report, w,
+                (room, i) => step($"Carnets de pièces : {i}/{rooms.Count} — {RevitUtil.RoomLabel(room)}"), cancelled);
         }
         if (Steps.Fiches && !cancelled())
         {
             var gen = new FicheGenerator(_doc, _data, Norms);
             var todo = _joinery.Where(j => j.Lot != null).ToList();
             if (MaxFiches is { } mf) todo = todo.Where(j => FicheGenerator.ExistingLabel(j) == null).Take(mf).ToList();
-            for (int i = 0; i < todo.Count && !cancelled(); i++)
-            {
-                if (FicheGenerator.ExistingLabel(todo[i]) != null && todo[i].Fiche == null) { report.Kept.Add($"{todo[i].Mark} : fiche {FicheGenerator.ExistingLabel(todo[i])} conservée"); continue; }
-                step($"Fiches menuiseries : {i + 1}/{todo.Count} — {todo[i].Mark}");
-                gen.Run(new[] { todo[i] }, report, w);
-            }
+            gen.Run(todo, report, w,
+                (item, i) => step($"Fiches menuiseries : {i}/{todo.Count} — {item.Mark}"), cancelled);
         }
         if ((Steps.Plans || Steps.Carnets || Steps.Fiches) && !cancelled())
         {

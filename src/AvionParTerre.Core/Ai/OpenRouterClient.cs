@@ -1,4 +1,7 @@
 using System.Globalization;
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -16,6 +19,7 @@ public sealed class LlmRequest
     public int MaxTokens { get; set; } = 8000;
     /// <summary>Demande une réponse JSON (response_format). Réessayé sans si le modèle ne le prend pas en charge.</summary>
     public bool JsonMode { get; set; } = true;
+    public JsonObject? ResponseSchema { get; set; }
     /// <summary>Recherche internet OpenRouter (plugin « web »).</summary>
     public bool WebSearch { get; set; }
     public int WebMaxResults { get; set; } = 3;
@@ -24,6 +28,7 @@ public sealed class LlmRequest
 public sealed class LlmResponse
 {
     public string Content { get; set; } = "";
+    public long ElapsedMilliseconds { get; set; }
     public string Model { get; set; } = "";
     public int PromptTokens { get; set; }
     public int CompletionTokens { get; set; }
@@ -33,7 +38,10 @@ public sealed class LlmResponse
 
 public sealed class LlmException : Exception
 {
-    public LlmException(string message, Exception? inner = null) : base(message, inner) { }
+    public HttpStatusCode? StatusCode { get; }
+    public TimeSpan? RetryAfter { get; }
+    public LlmException(string message, Exception? inner = null, HttpStatusCode? statusCode = null, TimeSpan? retryAfter = null)
+        : base(message, inner) { StatusCode = statusCode; RetryAfter = retryAfter; }
 }
 
 public interface ILlmClient
@@ -56,11 +64,17 @@ public sealed record ModelInfo(string Id, string Name, int ContextLength, double
 public sealed class OpenRouterClient : ILlmClient, IDisposable
 {
     public const string BaseUrl = "https://openrouter.ai/api/v1/";
+    // Pool connections across commands without sharing per-user authorization headers.
+    private static readonly SocketsHttpHandler SharedHandler = new() { PooledConnectionLifetime = TimeSpan.FromMinutes(5) };
     private readonly HttpClient _http;
+    private readonly TimeSpan _timeout;
+    private readonly ConcurrentDictionary<string, byte> _plainJsonModels = new(StringComparer.Ordinal);
 
-    public OpenRouterClient(string? apiKey, TimeSpan? timeout = null)
+    public OpenRouterClient(string? apiKey, TimeSpan? timeout = null, HttpMessageHandler? handler = null)
     {
-        _http = new HttpClient { BaseAddress = new Uri(BaseUrl), Timeout = timeout ?? TimeSpan.FromSeconds(180) };
+        _timeout = timeout ?? TimeSpan.FromSeconds(120);
+        _http = new HttpClient(handler ?? SharedHandler, disposeHandler: handler != null)
+            { BaseAddress = new Uri(BaseUrl), Timeout = _timeout };
         if (!string.IsNullOrWhiteSpace(apiKey))
             _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey.Trim());
         _http.DefaultRequestHeaders.Add("HTTP-Referer", "https://www.koffi-diabate.com");
@@ -110,15 +124,56 @@ public sealed class OpenRouterClient : ILlmClient, IDisposable
     {
         if (_http.DefaultRequestHeaders.Authorization == null)
             throw new LlmException("Aucune clé OpenRouter : la renseigner dans Avion par terre > Paramètres.");
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        budget.CancelAfter(_timeout);
+        var clock = Stopwatch.StartNew();
+        var jsonMode = request.JsonMode && !_plainJsonModels.ContainsKey(request.Model);
+        var retried = false;
         try
         {
-            return await SendAsync(request, request.JsonMode, ct).ConfigureAwait(false);
+            while (true)
+            {
+                try
+                {
+                    var response = await SendAsync(request, jsonMode, budget.Token).ConfigureAwait(false);
+                    response.ElapsedMilliseconds = clock.ElapsedMilliseconds;
+                    return response;
+                }
+                catch (LlmException ex) when (jsonMode && UnsupportedFormat(ex))
+                {
+                    // Explicit unsupported-format rejection only; never downgrade auth, quota, or malformed-schema errors.
+                    jsonMode = false;
+                    _plainJsonModels.TryAdd(request.Model, 0);
+                }
+                catch (LlmException ex) when (!retried && ex.StatusCode is HttpStatusCode.TooManyRequests or
+                    HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout)
+                {
+                    retried = true;
+                    var delay = ex.RetryAfter ?? TimeSpan.FromMilliseconds(300);
+                    if (delay > TimeSpan.FromSeconds(2)) throw; // Respect Retry-After; no long hidden wait.
+                    await Task.Delay(delay < TimeSpan.Zero ? TimeSpan.Zero : delay, budget.Token).ConfigureAwait(false);
+                }
+            }
         }
-        catch (LlmException ex) when (request.JsonMode && ex.Message.Contains("response_format", StringComparison.OrdinalIgnoreCase))
+        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
         {
-            return await SendAsync(request, false, ct).ConfigureAwait(false);
+            throw new LlmException("OpenRouter : délai de réponse dépassé (réessais compris).", ex);
+        }
+        catch (HttpRequestException ex)
+        {
+            // A connection failure may occur after generation started: don't blindly duplicate a billable request.
+            throw new LlmException("OpenRouter injoignable (réseau).", ex);
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or ArgumentOutOfRangeException)
+        {
+            throw new LlmException("OpenRouter : réponse API invalide.", ex);
         }
     }
+
+    private static bool UnsupportedFormat(LlmException ex) =>
+        ex.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.NotFound or HttpStatusCode.UnprocessableEntity &&
+        (ex.Message.Contains("response_format", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("structured output", StringComparison.OrdinalIgnoreCase)) &&
+        (ex.Message.Contains("not support", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("unsupported", StringComparison.OrdinalIgnoreCase));
 
     private async Task<LlmResponse> SendAsync(LlmRequest request, bool jsonMode, CancellationToken ct)
     {
@@ -130,35 +185,42 @@ public sealed class OpenRouterClient : ILlmClient, IDisposable
             ["messages"] = new JsonArray(request.Messages.Select(m => (JsonNode)new JsonObject { ["role"] = m.Role, ["content"] = m.Content }).ToArray()),
             ["usage"] = new JsonObject { ["include"] = true },
         };
-        if (jsonMode) body["response_format"] = new JsonObject { ["type"] = "json_object" };
+        if (jsonMode)
+        {
+            body["response_format"] = request.ResponseSchema == null
+                ? new JsonObject { ["type"] = "json_object" }
+                : new JsonObject
+                {
+                    ["type"] = "json_schema",
+                    ["json_schema"] = new JsonObject { ["name"] = "avion_decisions", ["strict"] = true, ["schema"] = request.ResponseSchema.DeepClone() },
+                };
+            body["provider"] = new JsonObject { ["require_parameters"] = true };
+        }
         if (request.WebSearch)
             body["plugins"] = new JsonArray(new JsonObject { ["id"] = "web", ["max_results"] = request.WebMaxResults });
 
         using var content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
-        HttpResponseMessage resp;
-        try
-        {
-            resp = await _http.PostAsync("chat/completions", content, ct).ConfigureAwait(false);
-        }
-        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
-        {
-            throw new LlmException("OpenRouter : délai de réponse dépassé.", ex);
-        }
-        catch (HttpRequestException ex)
-        {
-            throw new LlmException("OpenRouter injoignable (réseau) : " + ex.Message, ex);
-        }
-        using (resp)
+        using var resp = await _http.PostAsync("chat/completions", content, ct).ConfigureAwait(false);
         {
             var text = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
-                throw new LlmException($"OpenRouter ({(int)resp.StatusCode}) : {ErrorMessage(text)}");
+                throw new LlmException($"OpenRouter ({(int)resp.StatusCode}) : {ErrorMessage(text)}", statusCode: resp.StatusCode,
+                    retryAfter: resp.Headers.RetryAfter?.Delta ?? (resp.Headers.RetryAfter?.Date - DateTimeOffset.UtcNow));
             var root = JsonNode.Parse(text);
             if (root?["error"] != null) throw new LlmException("OpenRouter : " + ErrorMessage(text));
-            var msg = root?["choices"]?[0]?["message"];
+            if (root?["choices"] is not JsonArray { Count: > 0 } choices || choices[0] is not JsonObject choice)
+                throw new LlmException("OpenRouter : aucune réponse du modèle.");
+            var finishReason = JsonExtract.Str(choice, "finish_reason");
+            if (finishReason is "length" or "content_filter" or "error")
+                throw new LlmException($"OpenRouter : réponse incomplète ou refusée ({finishReason}), aucune décision appliquée.");
+            var msg = choice["message"] as JsonObject;
+            if (msg == null || !string.IsNullOrEmpty(JsonExtract.Str(msg, "refusal")))
+                throw new LlmException("OpenRouter : réponse refusée ou absente.");
+            var responseText = JsonExtract.Str(msg, "content");
+            if (string.IsNullOrWhiteSpace(responseText)) throw new LlmException("OpenRouter : contenu vide.");
             var r = new LlmResponse
             {
-                Content = msg?["content"]?.GetValue<string>() ?? "",
+                Content = responseText,
                 Model = root?["model"]?.GetValue<string>() ?? request.Model,
                 PromptTokens = JsonExtract.Int(root?["usage"]?["prompt_tokens"]) ?? 0,
                 CompletionTokens = JsonExtract.Int(root?["usage"]?["completion_tokens"]) ?? 0,
@@ -181,7 +243,7 @@ public sealed class OpenRouterClient : ILlmClient, IDisposable
             var m = e?["message"]?.GetValue<string>();
             if (!string.IsNullOrEmpty(m)) return m;
         }
-        catch (JsonException) { }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException) { }
         return body.Length > 300 ? body[..300] + "…" : body;
     }
 }
@@ -228,15 +290,15 @@ public static class JsonExtract
         return null;
     }
 
-    public static int? Int(JsonNode? n) => Dbl(n) is { } d ? (int)d : null;
+    public static int? Int(JsonNode? n) => Dbl(n) is { } d && double.IsFinite(d) && d >= int.MinValue && d <= int.MaxValue && Math.Truncate(d) == d ? (int)d : null;
 
     public static string? Str(JsonNode? n, string key)
     {
-        var v = n?[key];
+        var v = (n as JsonObject)?[key];
         if (v == null) return null;
         try
         {
-            var s = v.GetValueKind() == JsonValueKind.String ? v.GetValue<string>() : v.ToJsonString();
+            var s = v.GetValueKind() == JsonValueKind.String ? v.GetValue<string>() : "";
             s = s.Trim();
             return s.Length == 0 || s.Equals("null", StringComparison.OrdinalIgnoreCase) ? null : s;
         }
@@ -246,7 +308,7 @@ public static class JsonExtract
     public static List<string> StrList(JsonNode? n, string key)
     {
         var list = new List<string>();
-        if (n?[key] is JsonArray a)
+        if ((n as JsonObject)?[key] is JsonArray a)
             foreach (var x in a)
                 if (x != null && x.GetValueKind() == JsonValueKind.String && !string.IsNullOrWhiteSpace(x.GetValue<string>()))
                     list.Add(x.GetValue<string>().Trim());
