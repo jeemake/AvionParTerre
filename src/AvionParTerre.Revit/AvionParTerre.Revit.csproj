@@ -17,7 +17,8 @@
     <RevitDir>C:\Program Files\Autodesk\Revit $(RevitVersion)</RevitDir>
   </PropertyGroup>
 
-  <ItemGroup>
+  <!-- Revit installé : API du poste. Sinon (CI, poste sans Revit) : assemblies de référence NuGet. -->
+  <ItemGroup Condition="Exists('$(RevitDir)\RevitAPI.dll')">
     <Reference Include="RevitAPI">
       <HintPath>$(RevitDir)\RevitAPI.dll</HintPath>
       <Private>false</Private>
@@ -26,6 +27,10 @@
       <HintPath>$(RevitDir)\RevitAPIUI.dll</HintPath>
       <Private>false</Private>
     </Reference>
+  </ItemGroup>
+  <ItemGroup Condition="!Exists('$(RevitDir)\RevitAPI.dll')">
+    <PackageReference Include="Nice3point.Revit.Api.RevitAPI" Version="$(RevitVersion).*" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Nice3point.Revit.Api.RevitAPIUI" Version="$(RevitVersion).*" ExcludeAssets="runtime" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,0 +1,52 @@
+name: Installeur Windows
+# Construit AvionParTerre-<version>-Revit2025-Setup.exe (Inno Setup).
+# - à chaque push touchant le plugin : artefact « installeur » de l'exécution ;
+# - sur un tag v* (ex. v0.3.0) : publié en pièce jointe d'une release GitHub.
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+    paths:
+      - 'src/**'
+      - 'data/**'
+      - 'deploy/**'
+      - '.github/workflows/installer.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      REVIT_VERSION: '2025'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Version
+        id: version
+        shell: pwsh
+        run: |
+          $v = ([xml](Get-Content src/AvionParTerre.Revit/AvionParTerre.Revit.csproj)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+          "value=$v" >> $env:GITHUB_OUTPUT
+      - name: Compilation du plugin
+        run: dotnet build src/AvionParTerre.Revit/AvionParTerre.Revit.csproj -c Release -p:RevitVersion=${{ env.REVIT_VERSION }}
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; if ($LASTEXITCODE) { throw "Installation d'Inno Setup impossible." } }
+          & $iscc "/DAppVersion=${{ steps.version.outputs.value }}" "/DRevitVersion=${{ env.REVIT_VERSION }}" deploy/AvionParTerre.iss
+          if ($LASTEXITCODE) { throw "Échec d'Inno Setup." }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installeur
+          path: dist/*.exe
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.exe
+          generate_release_notes: true
