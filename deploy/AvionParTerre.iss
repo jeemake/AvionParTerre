@@ -54,11 +54,12 @@ fr.FinishedLabelNoIcons=Avion par terre est installé. Au prochain démarrage de
 [Code]
 function IsRevitRunning: Boolean;
 var
-  Wmi, Procs: Variant;
+  Locator, Wmi, Procs: Variant;
 begin
   Result := False;
   try
-    Wmi := CreateOleObject('WbemScripting.SWbemLocator').ConnectServer('.', 'root\CIMV2');
+    Locator := CreateOleObject('WbemScripting.SWbemLocator');
+    Wmi := Locator.ConnectServer('.', 'root\CIMV2');
     Procs := Wmi.ExecQuery('SELECT ProcessId FROM Win32_Process WHERE Name = ''Revit.exe''');
     Result := Procs.Count > 0;
   except
