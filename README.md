@@ -51,11 +51,21 @@ Les modifications de l'adaptateur nécessitent une compilation et un test dans R
 
 ## Installation
 
+### En un clic (utilisateurs)
+
+Télécharger `AvionParTerre-<version>-Revit2025-Setup.exe` (page **Releases** du dépôt, ou artefact « installeur » de la dernière exécution du workflow **Installeur Windows** dans l’onglet Actions), puis double-cliquer. Aucun droit administrateur, aucun SDK .NET : le plugin est copié dans `%APPDATA%\Autodesk\Revit\Addins\2025\AvionParTerre\` avec `AvionParTerre.addin`. L’installeur attend la fermeture de Revit et remplace une version précédente ; désinstallation par **Paramètres Windows > Applications installées > Avion par terre**. Les réglages (`%APPDATA%\AvionParTerre`) et les données de projet sont conservés.
+
+L’exécutable n’est pas signé : si Windows SmartScreen l’arrête, cliquer **Informations complémentaires > Exécuter quand même**.
+
+Publier une version : incrémenter `<Version>` dans `src/AvionParTerre.Revit/AvionParTerre.Revit.csproj`, puis pousser un tag `v<version>` (ex. `git tag v0.3.0 && git push origin v0.3.0`) : le workflow joint l’installeur à une release GitHub.
+
+### Depuis les sources (développeurs)
+
 ```bash
 powershell -ExecutionPolicy Bypass -File deploy/install.ps1
 ```
 
-Revit fermé. Le script compile, copie le plugin dans `%APPDATA%\Autodesk\Revit\Addins\2025\AvionParTerre\` et installe `AvionParTerre.addin`. Au redémarrage, l’onglet **Avion par terre** apparaît.
+Revit fermé. Le script compile, copie le plugin dans `%APPDATA%\Autodesk\Revit\Addins\2025\AvionParTerre\` et installe `AvionParTerre.addin`. Au redémarrage, l’onglet **Avion par terre** apparaît. Sans Revit sur le poste, la compilation utilise les assemblies de référence NuGet `Nice3point.Revit.Api`.
 
 ## Commandes (onglet « Avion par terre »)
 
